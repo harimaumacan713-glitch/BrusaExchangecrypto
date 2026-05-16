@@ -5,13 +5,56 @@ import dotenv from "dotenv";
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 
+import { GoogleGenAI } from "@google/genai";
+
 dotenv.config();
+
+// Initialize Gemini
+const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    }
+  }
+}) : null;
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
+  
+  // existing code...
+  app.get("/api/ai-signal", async (req, res) => {
+    try {
+      if (!ai) {
+        return res.json({ signal: "Neutral (AI Not Configured)", confidence: 50, summary: "Configure GEMINI_API_KEY for real AI insights." });
+      }
+
+      const { symbol } = req.query;
+      
+      // Fetch some context: news and current price
+      const newsRes = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&limit=5${process.env.CRYPTO_NEWS_API_KEY ? `&api_key=${process.env.CRYPTO_NEWS_API_KEY}` : ""}`);
+      const newsData = await newsRes.json();
+      const newsTitles = newsData.Data?.map((n: any) => n.title).join(". ") || "";
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Analyze the current market sentiment for ${symbol} based on these recent headlines: "${newsTitles}". Return a JSON object with: 
+        { "signal": "Strong Buy" | "Buy" | "Neutral" | "Sell" | "Strong Sell", "confidence": number (0-100), "summary": "one short sentence" }`,
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+      
+      const text = response.text || "{}";
+      res.json(JSON.parse(text));
+    } catch (error) {
+      console.error("Gemini Error:", error);
+      res.json({ signal: "Neutral", confidence: 50, summary: "Error fetching AI signal." });
+    }
+  });
   const subscriptions = new Map<WebSocket, string>();
 
   // Broadcast to all clients
@@ -178,10 +221,12 @@ async function startServer() {
       }
 
       // Map CryptoCompare data to the expected format
-      const formattedNews = ((data.Data && Array.isArray(data.Data)) ? data.Data : []).slice(0, 5).map((item: any) => ({
+      const formattedNews = ((data.Data && Array.isArray(data.Data)) ? data.Data : []).slice(0, 15).map((item: any) => ({
         title: item.title,
         time: new Date(item.published_on * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: item.published_on * 1000,
         image: item.imageurl,
+        categories: item.categories ? item.categories.split('|') : [],
       }));
       res.json({ results: formattedNews });
     } catch (error) {
@@ -196,11 +241,12 @@ async function startServer() {
     console.log('Fetching prices...');
     try {
       const apiKey = process.env.CRYPTO_NEWS_API_KEY;
-      const symbols = "BTC,ETH,SOL,USDT";
+      const symbolsList = ["BTC", "ETH", "SOL", "USDT", "XRP", "ADA", "DOT", "DOGE", "MATIC", "AVAX"];
+      const symbols = symbolsList.join(",");
       const url = `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${symbols}&tsyms=IDR${apiKey ? `&api_key=${apiKey}` : ""}`;
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 8000); 
 
       const response = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
@@ -211,17 +257,35 @@ async function startServer() {
       
       const data = await response.json();
       
-      if (data.Response === 'Error') {
-        throw new Error(`API Error: ${data.Message || 'Unknown error'}`);
+      if (data.Response === 'Error' || !data.RAW) {
+        throw new Error(`API Error: ${data.Message || 'No RAW data'}`);
       }
 
       console.log('Prices fetched successfully');
       res.json(data);
     } catch (error) {
-      console.error('Error fetching prices:', error);
-      // Fallback to mock prices if fetch fails
-      console.log('Returning mock prices due to error');
-      res.json(getMockPrices());
+      console.error('Primary price fetch failed, trying public Binance fallback:', error);
+      try {
+         // Fallback: Fetch a few major pairs from Binance Public API and construct a partial RAW/DISPLAY object
+         const btcRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
+         const btcData = await btcRes.json();
+         const btcPrice = parseFloat(btcData.price);
+         const rate = 16150; // Fallback rate
+
+         const fallbackData = {
+           RAW: {
+             BTC: { IDR: { PRICE: btcPrice * rate, PRICE_USDT: btcPrice, CHANGEPCT24HOUR: 0, MKTCAP: 0, VOLUME24HOUR: 0 } },
+             USDT: { IDR: { PRICE: rate, PRICE_USDT: 1, CHANGEPCT24HOUR: 0, MKTCAP: 0, VOLUME24HOUR: 0 } }
+           },
+           DISPLAY: {
+             BTC: { IDR: { PRICE: `Rp ${(btcPrice * rate).toLocaleString()}`, CHANGEPCT24HOUR: "0", MKTCAP: "0", VOLUME24HOUR: "0" } },
+             USDT: { IDR: { PRICE: `Rp ${rate.toLocaleString()}`, CHANGEPCT24HOUR: "0", MKTCAP: "0", VOLUME24HOUR: "0" } }
+           }
+         };
+         res.json(fallbackData);
+      } catch (fallbackError) {
+         res.json(getMockPrices());
+      }
     }
   });
 
@@ -243,22 +307,43 @@ function getMockPrices() {
 }
 
 function getMockNews() {
+  const now = Date.now();
   return [
     { 
       title: "Bitcoin Reaches New Highs", 
       time: "10:30",
-      image: "https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=200&h=200&fit=crop"
+      timestamp: now - 3600000, // 1h ago
+      image: "https://images.unsplash.com/photo-1518546305927-5a555bb7020d?w=200&h=200&fit=crop",
+      categories: ["Macroeconomics", "Technology"]
     },
     { 
       title: "Ethereum Network Upgrade Announced", 
       time: "11:15",
-      image: "https://images.unsplash.com/photo-1622790698141-94e30457ef12?w=200&h=200&fit=crop"
+      timestamp: now - 7200000, // 2h ago
+      image: "https://images.unsplash.com/photo-1622790698141-94e30457ef12?w=200&h=200&fit=crop",
+      categories: ["Technology"]
     },
     { 
       title: "New Regulation Framework for DeFi", 
       time: "12:00",
-      image: "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=200&h=200&fit=crop"
+      timestamp: now - 86400000, // 1 day ago
+      image: "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=200&h=200&fit=crop",
+      categories: ["Regulation"]
     },
+    { 
+      title: "Global Markets React to Fed Statements", 
+      time: "14:20",
+      timestamp: now - 172800000, // 2 days ago
+      image: "https://images.unsplash.com/photo-1611974714658-66d2c130094e?w=200&h=200&fit=crop",
+      categories: ["Macroeconomics"]
+    },
+    { 
+      title: "AI Integration in Crypto Exchanges", 
+      time: "09:45",
+      timestamp: now - 10800000, // 3h ago
+      image: "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=200&h=200&fit=crop",
+      categories: ["Technology"]
+    }
   ];
 }
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Bitcoin, Wallet, Coins, ShipWheel, DollarSign, Loader2, TrendingUp } from 'lucide-react';
+import { Bitcoin, Wallet, Coins, ShipWheel, DollarSign, Loader2, TrendingUp, Activity, TrendingDown } from 'lucide-react';
 import { motion } from 'motion/react';
+import { LineChart, Line, ResponsiveContainer } from 'recharts';
 
 import { useTrading } from '../context/TradingContext';
 
@@ -9,6 +10,7 @@ const iconMap: Record<string, any> = {
   ETH: { icon: Coins, color: 'text-blue-500', bg: 'bg-blue-100', name: 'Ethereum' },
   SOL: { icon: ShipWheel, color: 'text-purple-500', bg: 'bg-purple-100', name: 'Solana' },
   USDT: { icon: DollarSign, color: 'text-green-500', bg: 'bg-green-100', name: 'TRether' },
+  XRP: { icon: Activity, color: 'text-blue-400', bg: 'bg-blue-50', name: 'Ripple' },
 };
 
 export function Portfolio({ prices, loading }: { prices: any; loading: boolean }) {
@@ -16,46 +18,78 @@ export function Portfolio({ prices, loading }: { prices: any; loading: boolean }
   const [assets, setAssets] = useState<any[]>([]);
 
   useEffect(() => {
-    if (prices && prices.DISPLAY && positions.length > 0) {
-      const formatted = positions.map(pos => {
-        const symbol = pos.symbol;
-        const display = prices.DISPLAY[symbol]?.IDR;
-        const raw = prices.RAW[symbol]?.IDR;
-        const meta = iconMap[symbol] || { icon: Wallet, color: 'text-gray-500', bg: 'bg-gray-100', name: symbol };
-        
-        const currentPrice = raw?.PRICE || pos.entryPrice;
-        const marketValue = pos.amount * currentPrice;
-        const pnl = marketValue - (pos.amount * pos.entryPrice);
-        const pnlPercent = ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
+    if (prices && prices.RAW && positions.length > 0) {
+      const usdtIdrRate = 16150;
 
-        const pnlFormatted = new Intl.NumberFormat('id-ID', { 
-          style: 'currency', 
-          currency: 'IDR', 
-          maximumFractionDigits: 0,
-          signDisplay: 'always'
-        }).format(pnl);
+      setAssets(prevAssets => {
+        const newAssets = positions.map(pos => {
+          const symbol = pos.symbol;
+          const raw = prices.RAW[symbol]?.IDR;
+          const display = prices.DISPLAY[symbol]?.IDR;
+          
+          if (!raw) {
+            // Check if we already have this asset in prevAssets to avoid losing it temporarily
+            const existing = prevAssets.find(a => a.symbol === symbol);
+            if (existing) return existing;
+            return null; // Should not happen if data is consistent
+          }
 
-        return {
-          symbol,
-          name: meta.name,
-          amount: pos.amount,
-          balance: new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(marketValue),
-          pnl: pnlFormatted,
-          rawPnl: pnl,
-          pnlPercent: pnlPercent.toFixed(2),
-          change: display?.CHANGEPCT24HOUR ? `${display.CHANGEPCT24HOUR}%` : '0%',
-          icon: meta.icon,
-          color: meta.color,
-          bg: meta.bg
-        };
+          const meta = iconMap[symbol] || { icon: Wallet, color: 'text-gray-500', bg: 'bg-gray-100', name: symbol };
+          const logoUrl = display?.IMAGEURL ? `https://www.cryptocompare.com${display.IMAGEURL}` : null;
+          
+          const currentPriceUsdt = raw.PRICE_USDT || (raw.PRICE / usdtIdrRate) || pos.entryPrice;
+          const currentPriceIdr = currentPriceUsdt * usdtIdrRate;
+
+          const pnlUsdt = (currentPriceUsdt - pos.entryPrice) * pos.amount;
+          const pnlIdr = pnlUsdt * usdtIdrRate;
+          const pnlPercent = ((currentPriceUsdt - pos.entryPrice) / pos.entryPrice) * 100;
+          const marketValueIdr = pos.amount * currentPriceIdr;
+
+          const pnlFormatted = new Intl.NumberFormat('id-ID', { 
+            style: 'currency', 
+            currency: 'IDR', 
+            maximumFractionDigits: 0,
+            signDisplay: 'always'
+          }).format(pnlIdr);
+
+          // Find existing sparkline or generate once
+          const existingAsset = prevAssets.find(a => a.symbol === symbol);
+          let sparklineData = existingAsset?.sparklineData;
+          if (!sparklineData) {
+            const points = 15;
+            const trend = (raw.CHANGEPCT24HOUR || 0) > 0 ? 1 : -1;
+            sparklineData = Array.from({ length: points }).map((_, i) => ({
+              value: 50 + (i * trend * Math.random() * 2) + (Math.random() * 10 - 5)
+            }));
+          }
+
+          return {
+            symbol,
+            name: meta.name,
+            amount: pos.amount,
+            balance: new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(marketValueIdr),
+            pnl: pnlFormatted,
+            rawPnlIdr: pnlIdr,
+            pnlPercent: pnlPercent.toFixed(2),
+            change: raw.CHANGEPCT24HOUR ? `${raw.CHANGEPCT24HOUR.toFixed(2)}%` : '0%',
+            changeRaw: raw.CHANGEPCT24HOUR || 0,
+            icon: meta.icon,
+            color: meta.color,
+            bg: meta.bg,
+            logoUrl,
+            sparklineData
+          };
+        }).filter(Boolean);
+
+        return newAssets;
       });
-      setAssets(formatted);
-    } else {
+    } else if (!loading) {
       setAssets([]);
     }
-  }, [prices, positions]);
+  }, [prices, positions, loading]);
 
-  const totalUnrealizedPnl = assets.reduce((acc, asset) => acc + asset.rawPnl, 0);
+  const totalUnrealizedPnlIdr = assets.reduce((acc, asset) => acc + asset.rawPnlIdr, 0);
+  const balanceIdr = balance * 16150;
 
   return (
     <div className="px-6">
@@ -72,18 +106,17 @@ export function Portfolio({ prices, loading }: { prices: any; loading: boolean }
             <div className="relative z-10 flex justify-between items-end">
               <div>
                 <div className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 mb-1">Unrealized PnL</div>
-                <motion.div 
-                  key={totalUnrealizedPnl}
-                  initial={{ opacity: 0.5 }} animate={{ opacity: 1 }}
-                  className={`text-2xl font-black ${totalUnrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}
-                >
-                  {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0, signDisplay: 'always' }).format(totalUnrealizedPnl)}
-                </motion.div>
+                <div className={`text-2xl font-black ${totalUnrealizedPnlIdr >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0, signDisplay: 'always' }).format(totalUnrealizedPnlIdr)}
+                </div>
+                <div className="text-[10px] font-bold text-gray-500">
+                  ≈ ${ (totalUnrealizedPnlIdr / 16150).toFixed(2) } USDT
+                </div>
               </div>
               <div className="text-right">
                 <div className="text-[9px] font-black uppercase tracking-widest text-gray-500 mb-1">Realized Profit</div>
                 <div className={`text-sm font-bold ${totalRealizedPnl >= 0 ? 'text-cyan-400' : 'text-orange-400'}`}>
-                  {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0, signDisplay: 'always' }).format(totalRealizedPnl)}
+                  ${totalRealizedPnl.toFixed(2)} USDT
                 </div>
               </div>
             </div>
@@ -101,48 +134,73 @@ export function Portfolio({ prices, loading }: { prices: any; loading: boolean }
                 <p className="text-xs text-gray-300 mt-1">Start trading to see your assets here</p>
               </div>
             ) : (
-              assets.map((asset, index) => (
-                <motion.div 
+              assets.map((asset) => (
+                <div 
                   key={asset.symbol}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
                   className="flex justify-between p-5 bg-white border border-gray-100 rounded-3xl items-center shadow-sm hover:border-cyan-200 transition-colors cursor-pointer group"
                 >
                   <div className="flex gap-4 items-center">
-                      <div className={`${asset.bg} p-2.5 rounded-2xl group-hover:scale-110 transition-transform`}>
-                        <asset.icon className={`${asset.color} w-6 h-6`}/>
+                      <div className={`${asset.bg} p-2.5 rounded-2xl group-hover:scale-110 transition-transform flex items-center justify-center overflow-hidden w-11 h-11`}>
+                        {asset.logoUrl ? (
+                          <img src={asset.logoUrl} alt={asset.symbol} className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />
+                        ) : (
+                          <asset.icon className={`${asset.color} w-6 h-6`}/>
+                        )}
                       </div>
                       <div>
                         <div className="font-bold text-gray-900">{asset.name}</div>
-                        <div className="text-xs text-gray-400 font-medium">
+                        <div className="text-xs text-gray-400 font-medium whitespace-nowrap">
                           {asset.amount.toFixed(4)} {asset.symbol} • <span className={parseFloat(asset.pnlPercent) >= 0 ? 'text-green-500' : 'text-red-500'}>
                              {parseFloat(asset.pnlPercent) >= 0 ? '+' : ''}{asset.pnlPercent}%
                           </span>
                         </div>
                       </div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-bold text-gray-900">{asset.balance}</div>
-                    <div className={`text-[10px] font-bold ${parseFloat(asset.pnlPercent) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      {parseFloat(asset.pnlPercent) >= 0 ? '+' : ''}{asset.pnl}
+
+                  {/* Visual Sparkline Trend */}
+                  <div className="flex-1 h-10 max-w-[100px] mx-4 opacity-40 group-hover:opacity-100 transition-all duration-500 hidden sm:block">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={asset.sparklineData}>
+                        <Line 
+                          type="monotone" 
+                          dataKey="value" 
+                          stroke={asset.changeRaw >= 0 ? '#22c55e' : '#f43f5e'} 
+                          strokeWidth={2} 
+                          dot={false} 
+                          isAnimationActive={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="text-right flex flex-col items-end gap-1.5 ml-2">
+                    <div className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-0.5">Asset Value</div>
+                    <div className="font-bold text-gray-900 leading-none">{asset.balance}</div>
+                    <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-tight transition-all duration-300 ${
+                      parseFloat(asset.pnlPercent) >= 0 
+                        ? 'bg-green-50 text-green-600 border-green-100 shadow-sm shadow-green-500/5' 
+                        : 'bg-red-50 text-red-600 border-red-100 shadow-sm shadow-red-500/5'
+                    }`}>
+                      {parseFloat(asset.pnlPercent) >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                      <span className="ml-0.5">{asset.pnl}</span>
+                      <span className="opacity-60 ml-1">({parseFloat(asset.pnlPercent) >= 0 ? '+' : ''}{asset.pnlPercent}%)</span>
                     </div>
                   </div>
-                </motion.div>
+                </div>
               ))
             )}
 
-            <div className="flex justify-between p-5 bg-gray-50/50 border border-dashed border-gray-200 rounded-3xl items-center mt-2">
+            <div className="flex justify-between p-5 bg-white border border-gray-100 rounded-3xl items-center mt-2 shadow-sm">
                 <div className="flex gap-4 items-center">
-                   <div className="bg-white p-2.5 rounded-2xl shadow-xs border border-gray-100"><Wallet className="text-cyan-500 w-6 h-6"/></div>
+                   <div className="bg-cyan-50 p-2.5 rounded-2xl border border-cyan-100/50"><Wallet className="text-cyan-600 w-6 h-6"/></div>
                     <div>
-                      <div className="font-bold text-gray-700">Cash Balance</div>
-                      <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Tersedia untuk trading</div>
+                      <div className="font-bold text-gray-800">Available USDT</div>
+                      <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Trading balance</div>
                     </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-bold text-gray-900">IDR {balance.toLocaleString('id-ID')}</div>
-                  <div className="text-[9px] font-black text-green-500 uppercase">Ready to Use</div>
+                  <div className="font-bold text-gray-900">${balance.toLocaleString()} USDT</div>
+                  <div className="text-[9px] font-black text-cyan-600 uppercase">≈ IDR {balanceIdr.toLocaleString('id-ID')}</div>
                 </div>
             </div>
         </div>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Bitcoin, TrendingUp, TrendingDown, Activity, Users, Info, 
   BarChart3, ChevronDown, ChevronUp, Star, StarOff, 
@@ -84,27 +84,113 @@ function AnalysisChart({
   useEffect(() => {
     if (history.length > 0 && currentPrice) {
       const lastPoint = history[history.length - 1];
-      // Only add if price actually changed and it's a new minute or enough time passed
-      if (lastPoint.price !== currentPrice) {
+      // Only add if price actually changed by more than 0.001% to avoid noise
+      const priceDiff = Math.abs(lastPoint.price - currentPrice) / lastPoint.price;
+      if (priceDiff > 0.00001) {
         const now = new Date();
         const newPoint = {
           time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           fullTime: now.toLocaleString(),
           price: currentPrice
         };
-        setHistory(prev => [...prev.slice(-49), newPoint]); // Keep last 50 points
+        setHistory(prev => {
+          // Double check the last point in the functional update to be safe
+          if (prev.length > 0 && prev[prev.length - 1].price === currentPrice) return prev;
+          return [...prev.slice(-49), newPoint];
+        });
       }
     }
   }, [currentPrice]);
 
   // Mock comparison history tracking live as well
   const compareHistory = useMemo(() => {
-    if (!compareSymbol) return null;
-    return history.map(h => ({
+    if (!compareSymbol || history.length === 0) return null;
+    return history.map((h, i) => ({
       ...h,
-      comparePrice: (Math.random() * 50 + 50) + (h.price * 0.8) // Mocked relative movement
+      // Use a deterministic seed (index) for mock comparison to avoid random junk every render
+      comparePrice: (h.price * 0.8) + (Math.sin(i) * h.price * 0.05)
     }));
   }, [compareSymbol, history]);
+
+  const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
+  const [dragInfo, setDragInfo] = useState<{ id: string, type: 'start' | 'end', lastX: string, lastY: number } | null>(null);
+  const lastClickRef = useRef<number>(0);
+
+  const priceRange = useMemo(() => {
+    if (history.length === 0) return 0;
+    const prices = history.map(h => h.price);
+    return Math.max(...prices) - Math.min(...prices) || 100;
+  }, [history]);
+
+  const findLineAtPosition = (x: string, y: number) => {
+    // Thresholds for selection
+    const yThreshold = priceRange * 0.05; 
+    
+    for (const line of trendlines) {
+      const dist1 = Math.sqrt(Math.pow(history.findIndex(h => h.time === line.x1) - history.findIndex(h => h.time === x), 2) + Math.pow((line.y1 - y) / priceRange * 10, 2));
+      const dist2 = Math.sqrt(Math.pow(history.findIndex(h => h.time === line.x2) - history.findIndex(h => h.time === x), 2) + Math.pow((line.y2 - y) / priceRange * 10, 2));
+      
+      if (dist1 < 1) return { id: line.id, type: 'start' as const };
+      if (dist2 < 1) return { id: line.id, type: 'end' as const };
+      
+      // Basic segment check could be added here but endpoint is usually enough for selection
+    }
+    return null;
+  };
+
+  const handleMouseDown = (state: any) => {
+    if (!state || !state.activeLabel || !state.activePayload || tool !== 'none') return;
+
+    const x = state.activeLabel;
+    const y = state.activePayload[0].value;
+    const target = findLineAtPosition(x, y);
+
+    if (target) {
+      setSelectedLineId(target.id);
+      setDragInfo({ ...target, lastX: x, lastY: y });
+    } else {
+      setSelectedLineId(null);
+    }
+  };
+
+  const handleMouseMove = (state: any) => {
+    if (!state || !state.activeLabel || !state.activePayload || !dragInfo) return;
+
+    const x = state.activeLabel;
+    const y = state.activePayload[0].value;
+
+    setTrendlines(prev => prev.map(line => {
+      if (line.id === dragInfo.id) {
+        if (dragInfo.type === 'start') {
+          return { ...line, x1: x, y1: y };
+        } else {
+          return { ...line, x2: x, y2: y };
+        }
+      }
+      return line;
+    }));
+  };
+
+  const handleMouseUp = () => {
+    if (dragInfo) {
+      setDragInfo(null);
+      saveAnalysis();
+    }
+  };
+
+  const handleDoubleClick = (state: any) => {
+    if (!state || !state.activeLabel || !state.activePayload) return;
+    
+    const x = state.activeLabel;
+    const y = state.activePayload[0].value;
+    const target = findLineAtPosition(x, y);
+
+    if (target) {
+      setTrendlines(prev => prev.filter(l => l.id !== target.id));
+      setSelectedLineId(null);
+      setTimeout(saveAnalysis, 0);
+    }
+  };
 
   const handleChartClick = (state: any) => {
     if (!state || !state.activeLabel || !state.activePayload) return;
@@ -229,7 +315,14 @@ function AnalysisChart({
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={compareHistory || history} onClick={handleChartClick}>
+            <LineChart 
+              data={compareHistory || history} 
+              onClick={handleChartClick}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onDoubleClick={handleDoubleClick}
+            >
             <XAxis dataKey="time" hide />
             <YAxis hide domain={['auto', 'auto']} />
             <Line 
@@ -239,7 +332,7 @@ function AnalysisChart({
               strokeWidth={3} 
               dot={false}
               activeDot={{ r: 4, fill: '#06b6d4', stroke: '#fff', strokeWidth: 2 }}
-              animationDuration={1000}
+              animationDuration={0} // Smoother during drags
             />
             {compareSymbol && (
               <Line 
@@ -249,17 +342,26 @@ function AnalysisChart({
                 strokeWidth={2} 
                 strokeDasharray="5 5"
                 dot={false}
+                animationDuration={0}
               />
             )}
             
             {/* Render Trendlines */}
             {trendlines.map(line => (
-              <ReferenceLine 
-                key={line.id} 
-                segment={[{ x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 }]} 
-                stroke="#f59e0b" 
-                strokeWidth={2} 
-              />
+              <React.Fragment key={line.id}>
+                <ReferenceLine 
+                  segment={[{ x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 }]} 
+                  stroke={selectedLineId === line.id ? "#06b6d4" : "#f59e0b"} 
+                  strokeWidth={selectedLineId === line.id ? 4 : 2} 
+                  className="cursor-pointer"
+                />
+                {selectedLineId === line.id && (
+                  <>
+                    <ReferenceDot x={line.x1} y={line.y1} r={4} fill="#06b6d4" stroke="#fff" />
+                    <ReferenceDot x={line.x2} y={line.y2} r={4} fill="#06b6d4" stroke="#fff" />
+                  </>
+                )}
+              </React.Fragment>
             ))}
 
             {/* Render Annotations */}
@@ -557,7 +659,13 @@ export function LiveMarket({ prices, loading }: { prices: any; loading: boolean 
     if (!prices?.RAW) return [];
     return Object.keys(prices.RAW).map(symbol => {
       const raw = prices.RAW[symbol].IDR;
-      const display = prices.DISPLAY[symbol].IDR;
+      const display = prices.DISPLAY?.[symbol]?.IDR;
+      if (!display) return null;
+
+      // Seeded random-ish value based on symbol characters so it is stable per symbol
+      const seed = symbol.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const sentiment = (seed % 40) + 60;
+
       return {
         symbol,
         price: display.PRICE,
@@ -565,9 +673,10 @@ export function LiveMarket({ prices, loading }: { prices: any; loading: boolean 
         marketCap: display.MKTCAP,
         volume: display.VOLUME24HOUR || 'N/A',
         isPositive: parseFloat(display.CHANGEPCT24HOUR) >= 0,
-        sentiment: Math.floor(Math.random() * 40) + 60 // 60-100% positive
+        sentiment, 
+        logoUrl: display.IMAGEURL ? `https://www.cryptocompare.com${display.IMAGEURL}` : null
       };
-    });
+    }).filter(Boolean);
   }, [prices]);
 
   const marketData = activeTab === 'Watchlist' 
@@ -579,8 +688,14 @@ export function LiveMarket({ prices, loading }: { prices: any; loading: boolean 
   return (
     <section className="pb-10">
       <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold tracking-tight text-gray-900">Market Assets</h2>
-          <button className="text-[#06b6d4] text-xs font-bold uppercase tracking-widest">View Heatmap</button>
+          <div className="flex flex-col">
+            <h2 className="text-xl font-black tracking-tight text-gray-900 uppercase font-sans">Market Assets</h2>
+            <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Real-time data from Binance Global</p>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1 bg-cyan-50 rounded-full border border-cyan-100 shadow-sm">
+             <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
+             <span className="text-[10px] font-black text-cyan-600 uppercase tracking-widest">LIVE • BINANCE</span>
+          </div>
       </div>
 
       <div className="flex gap-4 mb-8 overflow-x-auto pb-2 scrollbar-none">
@@ -618,8 +733,12 @@ export function LiveMarket({ prices, loading }: { prices: any; loading: boolean 
                             >
                               {isWatched ? <Star className="w-4 h-4 fill-current" /> : <StarOff className="w-4 h-4" />}
                             </button>
-                            <div className={`p-3 rounded-2xl transition-all ${isExpanded ? 'bg-cyan-500 text-white' : 'bg-cyan-50 text-cyan-600'}`}>
-                              <span className="font-black text-xs">{item.symbol.substring(0, 2)}</span>
+                            <div className={`p-2 rounded-2xl transition-all flex items-center justify-center overflow-hidden w-12 h-12 ${isExpanded ? 'bg-cyan-500 text-white' : 'bg-cyan-50 text-cyan-600'}`}>
+                              {item.logoUrl ? (
+                                <img src={item.logoUrl} alt={item.symbol} className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="font-black text-xs">{item.symbol.substring(0, 2)}</span>
+                              )}
                             </div>
                             <div>
                                 <div className="font-bold text-gray-900">{item.symbol}</div>
@@ -638,14 +757,8 @@ export function LiveMarket({ prices, loading }: { prices: any; loading: boolean 
                         </div>
                     </div>
 
-                    <AnimatePresence>
-                        {isExpanded && (
-                            <motion.div 
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden"
-                            >
+                    {isExpanded && (
+                        <div className="overflow-hidden">
                                 <div className="px-5 pb-6 pt-2">
                                     {/* Time Range Selector */}
                                     <div className="flex gap-2 mb-4">
@@ -706,9 +819,8 @@ export function LiveMarket({ prices, loading }: { prices: any; loading: boolean 
                                         </button>
                                     </div>
                                 </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
+                      </div>
+                    )}
                 </div>
             );
         }) : (

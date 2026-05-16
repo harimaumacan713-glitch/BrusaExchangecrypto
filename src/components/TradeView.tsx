@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowDownUp, Info, ChevronDown, Wallet, Target, Zap, History, Clock, CheckCircle2, XCircle, Orbit } from 'lucide-react';
+import { ArrowDownUp, Info, ChevronDown, Wallet, Target, Zap, History, Clock, CheckCircle2, XCircle, Orbit, Landmark } from 'lucide-react';
 
 
 
@@ -9,31 +9,33 @@ import { useTrading } from '../context/TradingContext';
 export function TradeView({ prices, loading }: { prices: any; loading: boolean }) {
   const { balance, buyAsset, sellAsset, positions, orders, getTotalValue } = useTrading();
   
-  const currentPrices: Record<string, number> = {};
+  const currentPricesUsdt: Record<string, number> = {};
   if (prices && prices.RAW) {
     Object.keys(prices.RAW).forEach(symbol => {
-      currentPrices[symbol] = prices.RAW[symbol].IDR.PRICE;
+      currentPricesUsdt[symbol] = prices.RAW[symbol].IDR.PRICE_USDT || (prices.RAW[symbol].IDR.PRICE / 16150);
     });
   }
 
-  const totalValue = getTotalValue(currentPrices);
+  const totalValueUsdt = getTotalValue(currentPricesUsdt);
+  const totalValueIdr = totalValueUsdt * 16150;
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [fromAmount, setFromAmount] = useState('');
   const [targetAsset, setTargetAsset] = useState('BTC');
-  const [orderType, setOrderType] = useState<'market' | 'limit'>('market');
-  const [limitPrice, setLimitPrice] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastOrderMessage, setLastOrderMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
-  const currentPrice = prices?.RAW?.[targetAsset]?.IDR?.PRICE || 0;
+  // Use USDT price for calculations if available, fallback to IDR / 16350
+  const currentPriceUsdt = prices?.RAW?.[targetAsset]?.IDR?.PRICE_USDT || (prices?.RAW?.[targetAsset]?.IDR?.PRICE / 16150) || 0;
+  const logoUrl = prices?.DISPLAY?.[targetAsset]?.IDR?.IMAGEURL ? `https://www.cryptocompare.com${prices.DISPLAY[targetAsset].IDR.IMAGEURL}` : null;
+
   const currentPosition = positions.find(p => p.symbol === targetAsset);
-  const unrealizedPnl = currentPosition ? (currentPrice - currentPosition.entryPrice) * currentPosition.amount : 0;
-  const pnlPercent = currentPosition ? ((currentPrice - currentPosition.entryPrice) / currentPosition.entryPrice) * 100 : 0;
+  const unrealizedPnlUsdt = currentPosition ? (currentPriceUsdt - currentPosition.entryPrice) * currentPosition.amount : 0;
+  const pnlPercent = currentPosition ? ((currentPriceUsdt - currentPosition.entryPrice) / currentPosition.entryPrice) * 100 : 0;
   
-  // If buying: formAmount is IDR, toAmount is crypto
-  // If selling: fromAmount is crypto, toAmount is IDR
-  const toAmount = fromAmount && currentPrice 
-    ? (side === 'buy' ? (parseFloat(fromAmount) / currentPrice).toFixed(8) : (parseFloat(fromAmount) * currentPrice).toFixed(0)) 
+  // Side Buy: Pay USDT, Receive Asset
+  // Side Sell: Pay Asset, Receive USDT
+  const toAmount = fromAmount && currentPriceUsdt 
+    ? (side === 'buy' ? (parseFloat(fromAmount) / currentPriceUsdt).toFixed(8) : (parseFloat(fromAmount) * currentPriceUsdt).toFixed(2)) 
     : '0';
 
   const handleSwap = () => {
@@ -42,10 +44,7 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
     setIsProcessing(true);
     setLastOrderMessage(null);
     
-    // Choose execution price: limitPrice if selected, otherwise current market price
-    const executionPrice = orderType === 'limit' && limitPrice ? parseFloat(limitPrice) : currentPrice;
-    
-    // Recalculate amount based on execution price
+    const executionPrice = currentPriceUsdt;
     const execAmount = side === 'buy' 
       ? parseFloat(fromAmount) / executionPrice 
       : parseFloat(fromAmount);
@@ -53,22 +52,23 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
     setTimeout(() => {
       let success = false;
       if (side === 'buy') {
-        success = buyAsset(targetAsset, execAmount, executionPrice, currentPrice);
+        // buyAsset(symbol, amount_of_asset, price_in_usdt)
+        success = buyAsset(targetAsset, execAmount, executionPrice);
       } else {
-        success = sellAsset(targetAsset, execAmount, executionPrice, currentPrice);
+        // sellAsset(symbol, amount_of_asset, price_in_usdt)
+        success = sellAsset(targetAsset, execAmount, executionPrice);
       }
 
       if (success) {
         setFromAmount('');
-        setLimitPrice('');
         setLastOrderMessage({ 
           type: 'success', 
-          text: `Successfully ${side === 'buy' ? 'bought' : 'sold'} ${execAmount.toFixed(4)} ${targetAsset} at IDR ${executionPrice.toLocaleString('id-ID')}`
+          text: `Successfully ${side === 'buy' ? 'bought' : 'sold'} ${execAmount.toFixed(4)} ${targetAsset} at $${executionPrice.toLocaleString()}`
         });
       } else {
         setLastOrderMessage({ 
           type: 'error', 
-          text: side === 'buy' ? 'Insufficient IDR balance' : `Insufficient ${targetAsset} balance`
+          text: side === 'buy' ? 'Insufficient USDT balance' : `Insufficient ${targetAsset} balance`
         });
       }
       setIsProcessing(false);
@@ -80,41 +80,33 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
     BTC: '₿',
     ETH: 'Ξ',
     SOL: 'S',
-    USDT: '₮'
-  };
-
-  const assetColors: Record<string, string> = {
-    BTC: 'bg-orange-500',
-    ETH: 'bg-blue-500',
-    SOL: 'bg-purple-500',
-    USDT: 'bg-green-500'
+    XRP: 'X'
   };
 
   return (
     <div className="px-6 py-4">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="font-bold text-2xl tracking-tight text-gray-900">Swift Swap</h2>
+        <h2 className="font-bold text-2xl tracking-tight text-gray-900">Live Trading</h2>
         <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-700 rounded-full shadow-lg shadow-cyan-500/30">
             <Orbit className="w-3.5 h-3.5 text-white animate-spin-slow" />
             <motion.span 
-              key={totalValue}
+              key={totalValueIdr}
               initial={{ scale: 0.9 }} animate={{ scale: 1 }}
               className="text-xs font-black text-white"
             >
-              IDR {totalValue.toLocaleString('id-ID')}
+              IDR {totalValueIdr.toLocaleString('id-ID', { maximumFractionDigits: 0 })}
             </motion.span>
           </div>
           <div className="flex items-center gap-2 mr-1">
-             <span className="text-[8px] font-black text-green-500 uppercase tracking-tighter">Live Equity</span>
+             <span className="text-[8px] font-black text-green-500 uppercase tracking-tighter">Equity (USDT)</span>
              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">
-               Cash: IDR {balance.toLocaleString('id-ID')}
+               Available: ${balance.toLocaleString()} USDT
              </span>
           </div>
         </div>
       </div>
 
-      {/* Buy/Sell/OrderType Toggles */}
       <div className="flex flex-col gap-3 mb-6">
         <div className="flex p-1 bg-gray-100 rounded-2xl">
           <button 
@@ -130,23 +122,6 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
             Sell
           </button>
         </div>
-
-        <div className="flex p-1 bg-gray-100 rounded-2xl">
-          <button 
-            onClick={() => setOrderType('market')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${orderType === 'market' ? 'bg-white text-cyan-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-          >
-            <Zap className={`w-3 h-3 ${orderType === 'market' ? 'fill-cyan-600' : ''}`} />
-            Market
-          </button>
-          <button 
-            onClick={() => setOrderType('limit')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${orderType === 'limit' ? 'bg-white text-cyan-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-          >
-            <Target className={`w-3 h-3 ${orderType === 'limit' ? 'fill-cyan-600' : ''}`} />
-            Limit
-          </button>
-        </div>
       </div>
 
       <div className="space-y-3">
@@ -157,9 +132,9 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
           className="bg-white border border-gray-100 rounded-[32px] p-6 shadow-sm"
         >
           <div className="flex justify-between text-sm text-gray-400 font-medium mb-4">
-            <span>You Pay ({side === 'buy' ? 'IDR' : targetAsset})</span>
+            <span>You Pay ({side === 'buy' ? 'USDT' : targetAsset})</span>
             <span className="flex items-center gap-1 font-bold text-gray-600">
-              {side === 'buy' ? `IDR ${balance.toLocaleString('id-ID')}` : `${targetAsset} ${currentPosition?.amount.toFixed(4) || '0.0000'}`}
+              {side === 'buy' ? `$ ${balance.toLocaleString()}` : `${targetAsset} ${currentPosition?.amount.toFixed(4) || '0.0000'}`}
             </span>
           </div>
           <div className="flex justify-between items-center">
@@ -172,64 +147,42 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
             />
             {side === 'buy' ? (
               <div className="bg-gray-50 p-3 rounded-2xl flex items-center gap-2 border border-gray-100">
-                <div className="w-6 h-6 bg-gray-900 rounded-full flex items-center justify-center text-[10px] text-white font-bold">Rp</div>
-                <span className="font-bold">IDR</span>
+                <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center text-[10px] text-white font-bold overflow-hidden">
+                  <img src="https://www.cryptocompare.com/media/37746338/usdt.png" alt="USDT" className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                </div>
+                <span className="font-bold">USDT</span>
               </div>
             ) : (
-               <select 
-                value={targetAsset}
-                onChange={(e) => setTargetAsset(e.target.value)}
-                className="bg-gray-50 hover:bg-gray-100 p-3 rounded-2xl flex items-center gap-2 border border-gray-100 transition-colors font-bold outline-none appearance-none cursor-pointer"
-              >
-                <option value="BTC">BTC</option>
-                <option value="ETH">ETH</option>
-                <option value="SOL">SOL</option>
-                <option value="USDT">USDT</option>
-              </select>
+               <div className="relative">
+                 <select 
+                  value={targetAsset}
+                  onChange={(e) => setTargetAsset(e.target.value)}
+                  className="bg-gray-50 hover:bg-gray-100 pl-11 pr-3 py-3 rounded-2xl flex items-center gap-2 border border-gray-100 transition-colors font-bold outline-none appearance-none cursor-pointer w-full min-w-[100px]"
+                >
+                  <option value="BTC">BTC</option>
+                  <option value="ETH">ETH</option>
+                  <option value="SOL">SOL</option>
+                  <option value="XRP">XRP</option>
+                </select>
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-white rounded-lg border border-gray-100 flex items-center justify-center overflow-hidden pointer-events-none">
+                  {logoUrl ? (
+                    <img src={logoUrl} alt={targetAsset} className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                  ) : (
+                    <span className="text-[8px] font-black">{targetAsset.substring(0, 2)}</span>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </motion.div>
 
-        {/* Limit Price Section (Visible only when Limit is selected) */}
-        <AnimatePresence>
-          {orderType === 'limit' && (
-            <motion.div 
-              initial={{ opacity: 0, height: 0, marginTop: 0 }}
-              animate={{ opacity: 1, height: 'auto', marginTop: 12 }}
-              exit={{ opacity: 0, height: 0, marginTop: 0 }}
-              className="overflow-hidden"
-            >
-              <div className="bg-cyan-50/50 border border-cyan-100 rounded-[28px] p-5 shadow-inner">
-                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-cyan-600 mb-2 px-1">
-                  <span>Limit Price</span>
-                  <span>BTC/ETH</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <input 
-                    type="number" 
-                    value={limitPrice}
-                    onChange={(e) => setLimitPrice(e.target.value)}
-                    className="text-2xl font-bold bg-transparent outline-none flex-1 placeholder:text-cyan-200"
-                    placeholder="Enter limit price"
-                  />
-                  <button className="bg-white px-3 py-1.5 rounded-lg text-[10px] font-bold text-cyan-600 border border-cyan-100">
-                    Set Market
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Swap Icon */}
         <div className="flex justify-center -my-3 relative z-10">
-          <motion.button 
-            whileHover={{ rotate: 180 }}
-            whileTap={{ scale: 0.9 }}
+          <motion.div 
             className="bg-[#06b6d4] p-4 rounded-2xl shadow-xl shadow-cyan-500/30 border-4 border-[#F8FAFC]"
           >
             <ArrowDownUp className="text-white w-6 h-6" />
-          </motion.button>
+          </motion.div>
         </div>
 
         {/* To Section */}
@@ -239,14 +192,14 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
           className="bg-white border border-gray-100 rounded-[32px] p-6 shadow-sm"
         >
           <div className="flex justify-between text-sm text-gray-400 font-medium mb-4">
-            <span>You Receive ({side === 'buy' ? targetAsset : 'IDR'})</span>
+            <span>You Receive ({side === 'buy' ? targetAsset : 'USDT'})</span>
             <div className="flex flex-col items-end">
               <span className="flex items-center gap-1 font-bold text-gray-600 text-right">
-                 {side === 'buy' ? `${targetAsset}: ${currentPosition?.amount.toFixed(4) || '0.0000'}` : `Balance: IDR ${balance.toLocaleString('id-ID')}`}
+                 {side === 'buy' ? `${targetAsset}: ${currentPosition ? currentPosition.amount.toFixed(4) : '0.0000'}` : `Balance: $${balance.toLocaleString()}`}
               </span>
               {currentPosition && (
-                <span className={`text-[10px] font-bold ${unrealizedPnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  PNL: {unrealizedPnl >= 0 ? '+' : ''}{unrealizedPnl.toLocaleString('id-ID', { maximumFractionDigits: 0, style: 'currency', currency: 'IDR' })} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
+                <span className={`text-[10px] font-bold ${unrealizedPnlUsdt >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  PNL: {unrealizedPnlUsdt >= 0 ? '+' : ''}${unrealizedPnlUsdt.toFixed(2)} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
                 </span>
               )}
             </div>
@@ -254,26 +207,37 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
           <div className="flex justify-between items-center">
             <input 
               type="text" 
-              value={side === 'buy' ? toAmount : `IDR ${parseFloat(toAmount).toLocaleString('id-ID')}`}
+              value={side === 'buy' ? toAmount : `$${parseFloat(toAmount).toLocaleString()}`}
               readOnly
               className="text-2xl font-bold bg-transparent outline-none w-2/3"
               placeholder="0.0"
             />
             {side === 'buy' ? (
-              <select 
-                value={targetAsset}
-                onChange={(e) => setTargetAsset(e.target.value)}
-                className="bg-gray-50 hover:bg-gray-100 p-3 rounded-2xl flex items-center gap-2 border border-gray-100 transition-colors font-bold outline-none appearance-none cursor-pointer"
-              >
-                <option value="BTC">BTC</option>
-                <option value="ETH">ETH</option>
-                <option value="SOL">SOL</option>
-                <option value="USDT">USDT</option>
-              </select>
+              <div className="relative">
+                <select 
+                  value={targetAsset}
+                  onChange={(e) => setTargetAsset(e.target.value)}
+                  className="bg-gray-50 hover:bg-gray-100 pl-11 pr-3 py-3 rounded-2xl flex items-center gap-2 border border-gray-100 transition-colors font-bold outline-none appearance-none cursor-pointer w-full min-w-[100px]"
+                >
+                  <option value="BTC">BTC</option>
+                  <option value="ETH">ETH</option>
+                  <option value="SOL">SOL</option>
+                  <option value="XRP">XRP</option>
+                </select>
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-white rounded-lg border border-gray-100 flex items-center justify-center overflow-hidden pointer-events-none">
+                  {logoUrl ? (
+                    <img src={logoUrl} alt={targetAsset} className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                  ) : (
+                    <span className="text-[8px] font-black">{targetAsset.substring(0, 2)}</span>
+                  )}
+                </div>
+              </div>
             ) : (
                 <div className="bg-gray-50 p-3 rounded-2xl flex items-center gap-2 border border-gray-100">
-                  <div className="w-6 h-6 bg-gray-900 rounded-full flex items-center justify-center text-[10px] text-white font-bold">Rp</div>
-                  <span className="font-bold">IDR</span>
+                  <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center text-[10px] text-white font-bold overflow-hidden">
+                    <img src="https://www.cryptocompare.com/media/37746338/usdt.png" alt="USDT" className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                  </div>
+                  <span className="font-bold">USDT</span>
                 </div>
             )}
           </div>
@@ -282,8 +246,8 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
 
       <div className="mt-8">
         <div className="flex justify-between text-sm mb-4 px-2">
-          <span className="text-gray-400">Exchange Rate</span>
-          <span className="font-medium text-gray-600">1 {targetAsset} = IDR {currentPrice.toLocaleString('id-ID')}</span>
+          <span className="text-gray-400">Binance Market Price</span>
+          <span className="font-medium text-gray-600">1 {targetAsset} = ${currentPriceUsdt.toLocaleString()} USDT</span>
         </div>
         
         <AnimatePresence>
@@ -305,12 +269,12 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
           whileTap={{ scale: 0.98 }}
           onClick={handleSwap}
           disabled={isProcessing}
-          className={`w-full bg-gradient-to-r ${orderType === 'limit' ? 'from-indigo-500 to-purple-600 shadow-indigo-500/25' : 'from-cyan-500 to-blue-600 shadow-cyan-500/25'} text-white font-bold py-5 rounded-[24px] shadow-lg text-lg transition-all flex items-center justify-center gap-2`}
+          className={`w-full bg-gradient-to-r ${side === 'buy' ? 'from-green-500 to-emerald-600 shadow-green-500/25' : 'from-red-500 to-rose-600 shadow-red-500/25'} text-white font-bold py-5 rounded-[24px] shadow-lg text-lg transition-all flex items-center justify-center gap-2`}
         >
           {isProcessing ? (
             <div className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white" />
           ) : (
-            orderType === 'market' ? (side === 'buy' ? 'Buy Now' : 'Sell Now') : 'Place Limit Order'
+            side === 'buy' ? 'Confirm Purchase' : 'Confirm Sale'
           )}
         </motion.button>
       </div>
@@ -330,37 +294,57 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
             <div className="text-center py-10 px-4 bg-gray-50 rounded-3xl border border-dashed border-gray-200">
               <p className="text-sm text-gray-400 font-medium italic">No transactions yet</p>
             </div>
-          ) : orders.map((order) => (
-            <motion.div 
-              key={order.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-gray-50/50 border border-gray-100 rounded-2xl p-4 flex items-center justify-between group hover:bg-white hover:shadow-sm transition-all"
-            >
-              <div className="flex items-center gap-4">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs uppercase ${
-                  order.type === 'buy' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                }`}>
-                  {order.type === 'buy' ? 'B' : 'S'}
-                </div>
-                <div>
+          ) : orders.map((order) => {
+            const display = prices?.DISPLAY?.[order.symbol]?.IDR;
+            const orderLogoUrl = display?.IMAGEURL ? `https://www.cryptocompare.com${display.IMAGEURL}` : null;
+            
+            return (
+              <motion.div 
+                key={order.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-gray-50/50 border border-gray-100 rounded-2xl p-4 flex items-center justify-between group hover:bg-white hover:shadow-sm transition-all"
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs uppercase overflow-hidden ${
+                    (order as any).metadata?.type === 'withdrawal' ? 'bg-indigo-100 text-indigo-600' :
+                    order.type === 'buy' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                  }`}>
+                    {(order as any).metadata?.type === 'withdrawal' ? (
+                      <Landmark className="w-5 h-5" />
+                    ) : orderLogoUrl ? (
+                      <img src={orderLogoUrl} alt={order.symbol} className="w-6 h-6 object-contain" referrerPolicy="no-referrer" />
+                    ) : (
+                      order.type === 'buy' ? 'B' : 'S'
+                    )}
+                  </div>
+                  <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm text-gray-900">{order.symbol}</span>
-                    <span className="text-[10px] font-black uppercase tracking-tighter px-1.5 py-0.5 bg-white border border-gray-100 rounded-md text-gray-400">
-                      {order.type}
+                    <span className="font-bold text-sm text-gray-900">
+                      {(order as any).metadata?.type === 'withdrawal' ? 'Withdrawal' : order.symbol}
+                    </span>
+                    <span className={`text-[10px] font-black uppercase tracking-tighter px-1.5 py-0.5 bg-white border border-gray-100 rounded-md ${
+                      (order as any).metadata?.type === 'withdrawal' ? 'text-indigo-400' : 'text-gray-400'
+                    }`}>
+                      {(order as any).metadata?.type === 'withdrawal' ? 'ASIPP' : order.type}
                     </span>
                   </div>
-                  <div className="text-[11px] font-medium text-gray-400 mt-1">{new Date(order.timestamp).toLocaleString()}</div>
+                  <div className="text-[11px] font-medium text-gray-400 mt-1">
+                    {(order as any).metadata?.type === 'withdrawal' 
+                      ? `${(order as any).metadata.projectId} • ${new Date(order.timestamp).toLocaleTimeString()}`
+                      : new Date(order.timestamp).toLocaleString()
+                    }
+                  </div>
                 </div>
               </div>
 
               <div className="text-right">
                 <div className="font-mono text-sm font-bold text-gray-900">
-                  {order.type === 'buy' ? '-' : '+'}IDR {order.price.toLocaleString('id-ID')}
+                  {order.type === 'buy' || (order as any).metadata?.type === 'withdrawal' ? '-' : '+'}${order.amount.toLocaleString()}
                 </div>
                 {order.pnl !== undefined && order.pnl !== 0 && (
                   <div className={`text-[10px] font-black uppercase tracking-tight ${order.pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                    {order.pnl >= 0 ? 'Gain' : 'Loss'} {order.pnl >= 0 ? '+' : ''}IDR {Math.abs(order.pnl).toLocaleString('id-ID')}
+                    {order.pnl >= 0 ? 'Gain' : 'Loss'} {order.pnl >= 0 ? '+' : ''}${Math.abs(order.pnl).toFixed(2)}
                   </div>
                 )}
                 <div className="flex items-center justify-end gap-1.5 mt-1">
@@ -373,7 +357,8 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
                 </div>
               </div>
             </motion.div>
-          ))}
+          );
+        })}
         </div>
       </div>
     </div>

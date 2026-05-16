@@ -24,6 +24,7 @@ interface TradingContextType {
   positions: Position[];
   orders: Order[];
   totalRealizedPnl: number;
+  withdraw: (projectId: string, amount: number) => boolean;
   buyAsset: (symbol: string, amount: number, price: number, marketPrice?: number) => boolean;
   sellAsset: (symbol: string, amount: number, price: number, marketPrice?: number) => boolean;
   clearHistory: () => void;
@@ -34,31 +35,28 @@ interface TradingContextType {
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
 
 export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [balance, setBalance] = useState(100000000); // 100M IDR Initial
+  const [balance, setBalance] = useState(10000); // 10,000 USDT Initial
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
 
-  // Persistent storage simulation
+  // Persistent storage
   useEffect(() => {
-    const saved = localStorage.getItem('trading_data');
+    const saved = localStorage.getItem('trading_data_v2');
     if (saved) {
       const { balance: sBalance, positions: sPositions, orders: sOrders } = JSON.parse(saved);
-      setBalance(sBalance || 100000000);
+      setBalance(sBalance !== undefined ? sBalance : 10000);
       setPositions(sPositions || []);
       setOrders(sOrders || []);
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('trading_data', JSON.stringify({ balance, positions, orders }));
+    localStorage.setItem('trading_data_v2', JSON.stringify({ balance, positions, orders }));
   }, [balance, positions, orders]);
 
-  const buyAsset = (symbol: string, amount: number, price: number, marketPrice?: number) => {
+  const buyAsset = (symbol: string, amount: number, price: number) => {
     const cost = amount * price;
     if (balance < cost) return false;
-
-    // PNL vs Market (how much you saved)
-    const pnlVsMarket = marketPrice ? (marketPrice - price) * amount : 0;
 
     setBalance(prev => prev - cost);
     setPositions(prev => {
@@ -77,7 +75,6 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       amount,
       price,
       type: 'buy',
-      pnl: pnlVsMarket,
       timestamp: Date.now(),
       status: 'filled'
     }, ...prev]);
@@ -85,16 +82,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return true;
   };
 
-  const sellAsset = (symbol: string, amount: number, price: number, marketPrice?: number) => {
+  const sellAsset = (symbol: string, amount: number, price: number) => {
     const position = positions.find(p => p.symbol === symbol);
     if (!position || position.amount < amount) return false;
 
-    // Realized PNL vs Entry
     const realizedPnl = (price - position.entryPrice) * amount;
-    // PNL vs Market (how much extra you got)
-    const pnlVsMarket = marketPrice ? (price - marketPrice) * amount : 0;
-
     const proceeds = amount * price;
+    
     setBalance(prev => prev + proceeds);
     setPositions(prev => {
       const newPositions = prev.map(p => {
@@ -112,10 +106,29 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       amount,
       price,
       type: 'sell',
-      pnl: realizedPnl + pnlVsMarket, // Combined gain
+      pnl: realizedPnl,
       timestamp: Date.now(),
       status: 'filled'
     }, ...prev]);
+
+    return true;
+  };
+
+  const withdraw = (projectId: string, amount: number) => {
+    if (balance < amount || amount <= 0) return false;
+
+    setBalance(prev => prev - amount);
+    setOrders(prev => [{
+      id: Math.random().toString(36).substr(2, 9),
+      symbol: 'USDT',
+      amount,
+      price: 1,
+      type: 'sell', // Use sell type for withdrawal
+      timestamp: Date.now(),
+      status: 'filled',
+      pnl: 0,
+      metadata: { type: 'withdrawal', projectId }
+    } as any, ...prev]);
 
     return true;
   };
@@ -140,7 +153,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const totalRealizedPnl = orders.reduce((acc, order) => acc + (order.pnl || 0), 0);
 
   return (
-    <TradingContext.Provider value={{ balance, positions, orders, totalRealizedPnl, buyAsset, sellAsset, clearHistory, getTotalValue, getUnrealizedPnl }}>
+    <TradingContext.Provider value={{ balance, positions, orders, totalRealizedPnl, buyAsset, sellAsset, withdraw, clearHistory, getTotalValue, getUnrealizedPnl }}>
       {children}
     </TradingContext.Provider>
   );
