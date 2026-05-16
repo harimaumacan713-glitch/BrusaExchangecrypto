@@ -1,0 +1,6 @@
+{
+  "name": "Aether Crypto Exchange",
+  "description": "A premium, futuristic platform for real-time crypto trading, portfolio management, and advanced analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
