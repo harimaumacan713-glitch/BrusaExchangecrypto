@@ -1,6 +1,8 @@
-import React from 'react';
-import { Shield, Lock, Bell, Eye, Fingerprint, ChevronRight, Settings, Smartphone, Key } from 'lucide-react';
+import React, { useState } from 'react';
+import { Shield, Lock, Bell, Eye, Fingerprint, ChevronRight, Settings, Smartphone, Key, Copy, Check } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useFirebase } from '../context/FirebaseContext';
+import { query, collection, where, orderBy, onSnapshot } from 'firebase/firestore';
 
 const menuItems = [
   { icon: Fingerprint, label: 'Biometric Lock', sub: 'Enable FaceID/Fingerprint', active: true },
@@ -11,10 +13,60 @@ const menuItems = [
 ];
 
 export function SecureView() {
+  const { auth, db } = useFirebase();
+  const [copied, setCopied] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
+  const uid = auth.currentUser?.uid || 'Not logged in';
+
+  React.useEffect(() => {
+    if (!auth.currentUser) return;
+    const q = query(collection(db, 'transfer_masuk'), where('penerimaUid', '==', auth.currentUser.uid), orderBy('timestamp', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, [auth.currentUser, db]);
+
+  const copyUid = () => {
+    navigator.clipboard.writeText(uid);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="px-6 py-4">
       <h2 className="font-bold text-2xl tracking-tight text-gray-900 mb-6">Security Hub</h2>
       
+      <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm mb-6">
+        <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-bold text-gray-400">User UID</span>
+            <span className="text-[10px] font-bold text-gray-300">SHARE TO RECEIVE FUNDS</span>
+        </div>
+        <div 
+            onClick={copyUid}
+            className="flex items-center justify-between bg-gray-50 p-4 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors"
+        >
+            <span className="font-mono text-sm text-gray-800 break-all">{uid}</span>
+            {copied ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5 text-gray-400" />}
+        </div>
+      </div>
+
+      {history.length > 0 && (
+          <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm mb-6">
+              <h3 className="font-bold text-gray-900 mb-4">Incoming Transfers</h3>
+              <div className="space-y-3">
+                  {history.map((tx) => (
+                      <div key={tx.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                          <div>
+                              <div className="font-bold text-sm">+{tx.jumlah}</div>
+                              <div className="text-[10px] text-gray-500">{new Date(tx.timestamp?.toDate()).toLocaleString()}</div>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
+
       <div className="bg-gradient-to-br from-gray-900 to-slate-800 p-6 rounded-[32px] text-white shadow-xl mb-8 relative overflow-hidden">
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-4">

@@ -20,6 +20,7 @@ import { AcademyView } from './components/AcademyView';
 import { RecurringView } from './components/RecurringView';
 import { ChatView } from './components/ChatView';
 import { Wallet, Zap, LineChart, Shield, Orbit, BarChart3, ChevronLeft, X } from 'lucide-react';
+import { SplashScreen } from './components/SplashScreen';
 
 type TabType = 'home' | 'assets' | 'trade' | 'market' | 'secure' | 'analytics' | 'withdraw' | 'academy' | 'recurring' | 'chat' | 'chatroom';
 
@@ -40,27 +41,12 @@ export default function App() {
   );
 }
 
-import { auth } from './lib/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { SplashScreen } from './components/SplashScreen';
-import { LoginView } from './components/LoginView';
-
 function AppContent() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [assetAction, setAssetAction] = useState<'none' | 'withdraw' | 'deposit' | 'buy'>('none');
   const [prices, setPrices] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [user, setUser] = useState<User | null>(null);
-  const [loadingAuth, setLoadingAuth] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoadingAuth(false);
-    });
-    return unsubscribe;
-  }, []);
 
   const handleWithdrawClick = () => {
     setActiveTab('assets');
@@ -317,107 +303,109 @@ function AppContent() {
   };
 
   return (
-    <div className="max-w-md mx-auto bg-gray-50 min-h-screen relative shadow-2xl overflow-hidden font-sans">
-      <AnimatePresence>
-        {isInitializing ? (
-          <SplashScreen key="splash" onComplete={() => setIsInitializing(false)} />
-        ) : loadingAuth ? (
-           <div key="auth-loading" className="fixed inset-0 flex items-center justify-center bg-gray-900 text-white">Loading...</div>
-        ) : !user ? (
-          <LoginView key="login" />
-        ) : (
-          <motion.div
-            key="main"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="pb-24"
-          >
-            <div className="min-h-screen bg-[#F8FAFC] pb-28">
-              <AnimatePresence mode="wait">
-                {renderContent()}
-              </AnimatePresence>
+    <div className="bg-[#F8FAFC] min-h-screen font-sans flex flex-col items-center">
+      <div className="w-full max-w-md bg-white min-h-screen relative shadow-2xl shadow-blue-900/10 overflow-x-hidden">
+        <AnimatePresence>
+          {isInitializing ? (
+            <SplashScreen onComplete={() => setIsInitializing(false)} />
+          ) : (
+            <motion.div
+              key="main"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex flex-col min-h-screen"
+            >
+              <div className="flex-1 pb-28">
+                <AnimatePresence mode="wait">
+                  {renderContent()}
+                </AnimatePresence>
+              </div>
 
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-gray-100 flex justify-around items-center p-4 z-50 shadow-[0_-10px_30px_rgba(0,0,0,0.04)]">
-        
-        {/* Nav Item: Home */}
-        <button 
-          onClick={() => setActiveTab('home')}
-          className="flex flex-col items-center gap-1 group relative outline-none"
-        >
-          <div
-            className={`p-3 rounded-2xl transition-all duration-300 ${
-              activeTab === 'home' 
-                ? 'bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/30 text-white' 
-                : 'bg-transparent text-gray-400 hover:text-cyan-500'
-            }`}
-          >
-            <Orbit className="w-6 h-6" />
-          </div>
-          <span className={`text-[10px] font-bold uppercase tracking-wider transition-colors duration-300 ${
-            activeTab === 'home' ? 'text-cyan-600 mt-1 opacity-100' : 'text-gray-400 opacity-60'
-          }`}>Home</span>
-        </button>
+              {/* Bottom Navigation Locked to Container */}
+              <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
+                <div className="max-w-md mx-auto pointer-events-auto px-1 pb-1">
+                  <div className="bg-white/90 backdrop-blur-xl border border-gray-100/50 flex justify-around items-center p-3 rounded-t-[32px] md:rounded-[32px] md:mb-4 shadow-[0_-10px_40px_rgba(0,0,0,0.06)]">
+                    
+                    {/* Nav Item: Home */}
+                    <button 
+                      onClick={() => setActiveTab('home')}
+                      className="flex flex-col items-center gap-1 group relative outline-none"
+                    >
+                      <div
+                        className={`p-2.5 rounded-2xl transition-all duration-300 ${
+                          activeTab === 'home' 
+                            ? 'bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/30 text-white translate-y-[-4px]' 
+                            : 'bg-transparent text-gray-400 hover:text-cyan-500'
+                        }`}
+                      >
+                        <Orbit className="w-6 h-6" />
+                      </div>
+                      <span className={`text-[9px] font-black uppercase tracking-wider transition-all duration-300 ${
+                        activeTab === 'home' ? 'text-cyan-600 opacity-100' : 'text-gray-400 opacity-60'
+                      }`}>Home</span>
+                    </button>
 
-        {/* Nav Item: Assets */}
-        <button 
-          onClick={() => setActiveTab('assets')}
-          className="flex flex-col items-center gap-1 outline-none"
-        >
-          <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'assets' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
-            <Wallet className="w-6 h-6" />
-          </div>
-          <span className={`text-[10px] font-bold transition-all duration-300 ${activeTab === 'assets' ? 'text-cyan-600' : 'text-gray-400'}`}>Assets</span>
-        </button>
+                    {/* Nav Item: Assets */}
+                    <button 
+                      onClick={() => setActiveTab('assets')}
+                      className="flex flex-col items-center gap-1 outline-none"
+                    >
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'assets' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
+                        <Wallet className="w-5 h-5" />
+                      </div>
+                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'assets' ? 'text-cyan-600' : 'text-gray-400'}`}>Assets</span>
+                    </button>
 
-        {/* Nav Item: Trade */}
-        <button 
-          onClick={() => setActiveTab('trade')}
-          className="flex flex-col items-center gap-1 outline-none"
-        >
-          <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'trade' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
-            <Zap className="w-6 h-6" />
-          </div>
-          <span className={`text-[10px] font-bold transition-all duration-300 ${activeTab === 'trade' ? 'text-cyan-600' : 'text-gray-400'}`}>Trade</span>
-        </button>
+                    {/* Nav Item: Trade */}
+                    <button 
+                      onClick={() => setActiveTab('trade')}
+                      className="flex flex-col items-center gap-1 outline-none"
+                    >
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'trade' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
+                        <Zap className="w-5 h-5" />
+                      </div>
+                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'trade' ? 'text-cyan-600' : 'text-gray-400'}`}>Trade</span>
+                    </button>
 
-        {/* Nav Item: Market */}
-        <button 
-          onClick={() => setActiveTab('market')}
-          className="flex flex-col items-center gap-1 outline-none"
-        >
-          <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'market' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
-            <LineChart className="w-6 h-6" />
-          </div>
-          <span className={`text-[10px] font-bold transition-all duration-300 ${activeTab === 'market' ? 'text-cyan-600' : 'text-gray-400'}`}>Market</span>
-        </button>
+                    {/* Nav Item: Market */}
+                    <button 
+                      onClick={() => setActiveTab('market')}
+                      className="flex flex-col items-center gap-1 outline-none"
+                    >
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'market' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
+                        <LineChart className="w-5 h-5" />
+                      </div>
+                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'market' ? 'text-cyan-600' : 'text-gray-400'}`}>Market</span>
+                    </button>
 
-        {/* Nav Item: Analytics */}
-        <button 
-          onClick={() => setActiveTab('analytics')}
-          className="flex flex-col items-center gap-1 outline-none"
-        >
-          <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'analytics' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
-            <BarChart3 className="w-6 h-6" />
-          </div>
-          <span className={`text-[10px] font-bold transition-all duration-300 ${activeTab === 'analytics' ? 'text-cyan-600' : 'text-gray-400'}`}>Stats</span>
-        </button>
+                    {/* Nav Item: Analytics */}
+                    <button 
+                      onClick={() => setActiveTab('analytics')}
+                      className="flex flex-col items-center gap-1 outline-none"
+                    >
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'analytics' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
+                        <BarChart3 className="w-5 h-5" />
+                      </div>
+                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'analytics' ? 'text-cyan-600' : 'text-gray-400'}`}>Stats</span>
+                    </button>
 
-        {/* Nav Item: Secure */}
-        <button 
-          onClick={() => setActiveTab('secure')}
-          className="flex flex-col items-center gap-1 outline-none"
-        >
-          <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'secure' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
-            <Shield className="w-6 h-6" />
-          </div>
-          <span className={`text-[10px] font-bold transition-all duration-300 ${activeTab === 'secure' ? 'text-cyan-600' : 'text-gray-400'}`}>Secure</span>
-        </button>
+                    {/* Nav Item: Secure */}
+                    <button 
+                      onClick={() => setActiveTab('secure')}
+                      className="flex flex-col items-center gap-1 outline-none"
+                    >
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'secure' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
+                        <Shield className="w-5 h-5" />
+                      </div>
+                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'secure' ? 'text-cyan-600' : 'text-gray-400'}`}>Secure</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

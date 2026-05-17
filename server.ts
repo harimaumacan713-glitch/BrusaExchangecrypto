@@ -4,10 +4,17 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import admin from "firebase-admin";
 
 import { GoogleGenAI } from "@google/genai";
 
 dotenv.config();
+
+// Initialize Firebase Admin
+admin.initializeApp({
+    credential: admin.credential.applicationDefault()
+});
+const db = admin.firestore();
 
 // Initialize Gemini
 const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({
@@ -19,13 +26,88 @@ const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({
   }
 }) : null;
 
+// Simple in-memory cache
+const signalCache = new Map<string, { data: any, timestamp: number }>();
+const CACHE_DURATION = 60 * 60 * 1000; // 60 minutes
+
+// Prevent concurrent Gemini calls
+let geminiPromise: Promise<any> | null = null;
+let retryCount = 0;
+const MAX_RETRIES = 3;
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
   
-  // existing code...
+  app.use(express.json());
+
+  // API route for receiving transfer
+  app.post("/api/terima-saldo", async (req, res) => {
+    const { secretKey, penerimaUid, jumlah, senderUid } = req.body;
+
+    if (secretKey !== process.env.RAHASIA_TRANSFER_EKSTERNAL) {
+      // Log security issue
+      await db.collection('security_logs').add({
+        action: 'EXTERNAL_TRANSFER_FAILURE',
+        reason: 'INVALID_SECRET',
+        ip: req.ip,
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      }).catch(console.error);
+
+      return res.status(403).json({ error: "Forbidden: Invalid Secret Key" });
+    }
+
+    if (!penerimaUid || typeof jumlah !== 'number' || jumlah <= 0) {
+      return res.status(400).json({ success: false, error: "Invalid recipientUid or amount" });
+    }
+
+    try {
+      await db.runTransaction(async (transaction) => {
+        const userRef = db.collection('users').doc(penerimaUid);
+        const userSnap = await transaction.get(userRef);
+        
+        if (!userSnap.exists) {
+            throw new Error('User not found');
+        }
+
+        // Add balance
+        transaction.update(userRef, { 
+            balance: admin.firestore.FieldValue.increment(jumlah) 
+        });
+
+        // Log transfer in transfer_masuk
+        const logRef = db.collection('transfer_masuk').doc();
+        transaction.set(logRef, {
+            penerimaUid,
+            senderUid: senderUid || 'unknown',
+            jumlah,
+            status: 'success',
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+      });
+      res.status(200).json({ success: true, message: "Terjual diterima" });
+    } catch (error: any) {
+      console.error('Transfer Error:', error);
+      // Log failed transaction
+      await db.collection('transfer_masuk').add({
+          penerimaUid,
+          senderUid: senderUid || 'unknown',
+          jumlah,
+          status: 'failed',
+          error: error.message,
+          timestamp: admin.firestore.FieldValue.serverTimestamp()
+      }).catch(console.error);
+
+      if (error.message === 'User not found') {
+        res.status(404).json({ success: false, error: error.message });
+      } else {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    }
+  });
+
   app.get("/api/ai-signal", async (req, res) => {
     try {
       if (!ai) {
@@ -33,26 +115,94 @@ async function startServer() {
       }
 
       const { symbol } = req.query;
-      
-      // Fetch some context: news and current price
-      const newsRes = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&limit=5${process.env.CRYPTO_NEWS_API_KEY ? `&api_key=${process.env.CRYPTO_NEWS_API_KEY}` : ""}`);
-      const newsData = await newsRes.json();
-      const newsTitles = newsData.Data?.map((n: any) => n.title).join(". ") || "";
+      if (typeof symbol !== 'string') return res.status(400).json({ error: "Symbol is required" });
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Analyze the current market sentiment for ${symbol} based on these recent headlines: "${newsTitles}". Return a JSON object with: 
-        { "signal": "Strong Buy" | "Buy" | "Neutral" | "Sell" | "Strong Sell", "confidence": number (0-100), "summary": "one short sentence" }`,
-        config: {
-          responseMimeType: "application/json"
-        }
-      });
-      
-      const text = response.text || "{}";
-      res.json(JSON.parse(text));
-    } catch (error) {
+      // Check cache
+      const cached = signalCache.get(symbol);
+      if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+        return res.json(cached.data);
+      }
+
+      // If already fetching, wait for single active promise
+      if (geminiPromise) {
+          await geminiPromise;
+          const cachedAgain = signalCache.get(symbol);
+          if (cachedAgain) return res.json(cachedAgain.data);
+      }
+
+      const fetchTask = async (attempt = 0): Promise<any> => {
+          // Fetch some context: news and market data
+          const [newsRes, marketData] = await Promise.all([
+            fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&limit=5${process.env.CRYPTO_NEWS_API_KEY ? `&api_key=${process.env.CRYPTO_NEWS_API_KEY}` : ""}`).catch(() => ({ json: () => ({ Data: [] }) })),
+            (async () => {
+              try {
+                const apiKey = process.env.CRYPTO_NEWS_API_KEY;
+                const url = `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${symbol}&tsyms=IDR${apiKey ? `&api_key=${apiKey}` : ""}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                if (data.RAW && data.RAW[symbol]) return data.RAW[symbol].IDR;
+                throw new Error("No data");
+              } catch (e) {
+                // Fallback: Binance Public API for price
+                try {
+                  const bRes = await fetch(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}USDT`);
+                  const bData = await bRes.json();
+                  return { PRICE: parseFloat(bData.lastPrice) * 16000, VOLUME24HOUR: parseFloat(bData.volume), MKTCAP: 0 };
+                } catch (e2) {
+                  return { PRICE: 0, VOLUME24HOUR: 0, MKTCAP: 0 };
+                }
+              }
+            })()
+          ]);
+          
+          const newsData = await newsRes.json();
+          const newsTitles = newsData.Data?.map((n: any) => n.title).join(". ") || "";
+
+          try {
+              const response = await ai.models.generateContent({
+                model: "gemini-3-flash-preview",
+                contents: `Analyze the current market sentiment for ${symbol}. 
+                Market Data: Price: ${marketData.PRICE}, 24h Volume: ${marketData.VOLUME24HOUR}, Market Cap: ${marketData.MKTCAP}.
+                Recent News: "${newsTitles}". 
+                Return a JSON object with: 
+                { "signal": "Strong Buy" | "Buy" | "Neutral" | "Sell" | "Strong Sell", "confidence": number (0-100), "summary": "one short sentence" }`,
+                config: {
+                  responseMimeType: "application/json"
+                }
+              });
+              
+              const text = response.text || "{}";
+              const data = JSON.parse(text);
+              
+              // Update cache
+              signalCache.set(symbol, { data, timestamp: Date.now() });
+              return data;
+          } catch (e: any) {
+              if (e.status === 429 && attempt < MAX_RETRIES) {
+                  const delay = Math.pow(2, attempt) * 1000 * 5;
+                  await new Promise(resolve => setTimeout(resolve, delay));
+                  return fetchTask(attempt + 1);
+              }
+              throw e;
+          }
+      };
+
+      geminiPromise = fetchTask();
+      const data = await geminiPromise;
+      geminiPromise = null;
+
+      res.json(data);
+    } catch (error: any) {
+      geminiPromise = null;
       console.error("Gemini Error:", error);
-      res.json({ signal: "Neutral", confidence: 50, summary: "Error fetching AI signal." });
+      
+      // If we have stale cached data, return it even if expired to avoid showing an error
+      const staleCached = signalCache.get(req.query.symbol as string);
+      if (staleCached) {
+        return res.json(staleCached.data);
+      }
+
+      res.json({ signal: "Neutral", confidence: 50, summary: "AI service is currently busy or unavailable." });
     }
   });
   const subscriptions = new Map<WebSocket, string>();

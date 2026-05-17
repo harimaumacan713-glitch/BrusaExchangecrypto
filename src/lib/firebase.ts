@@ -1,9 +1,22 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getDatabase } from "firebase/database";
+import { getMessaging } from "firebase/messaging";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDR91D_1_ijJztpUD2qy-ovqvDsGZ83Zjg",
+  authDomain: "brusaexchangecrypto-a82b3.firebaseapp.com",
+  databaseURL: "https://brusaexchangecrypto-a82b3-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "brusaexchangecrypto-a82b3",
+  storageBucket: "brusaexchangecrypto-a82b3.firebasestorage.app",
+  messagingSenderId: "192578822040",
+  appId: "1:192578822040:web:4a584da0cbaa85d6dd55ed",
+  measurementId: "G-PFCBG9HGJS"
+};
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app); // Note: If the tool didn't explicitly return databaseId, it uses the default one.
 export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
+export const db = getFirestore(app);
+export const rtdb = getDatabase(app);
+export const messaging = getMessaging(app);

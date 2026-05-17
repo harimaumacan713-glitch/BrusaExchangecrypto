@@ -149,10 +149,16 @@ export function Portfolio({ prices, loading }: { prices: any; loading: boolean }
                       </div>
                       <div>
                         <div className="font-bold text-gray-900">{asset.name}</div>
-                        <div className="text-xs text-gray-400 font-medium whitespace-nowrap">
-                          {asset.amount.toFixed(4)} {asset.symbol} • <span className={parseFloat(asset.pnlPercent) >= 0 ? 'text-green-500' : 'text-red-500'}>
+                        <div className="flex gap-2 text-[10px] font-bold">
+                          <span className="text-gray-400">{asset.amount.toFixed(4)} {asset.symbol}</span>
+                          <motion.span 
+                            key={asset.pnl}
+                            initial={{ opacity: 0.5 }}
+                            animate={{ opacity: 1 }}
+                            className={parseFloat(asset.pnlPercent) >= 0 ? 'text-green-500' : 'text-red-500'}
+                          >
                              {parseFloat(asset.pnlPercent) >= 0 ? '+' : ''}{asset.pnlPercent}%
-                          </span>
+                          </motion.span>
                         </div>
                       </div>
                   </div>

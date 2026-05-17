@@ -6,7 +6,7 @@ interface AnalyticsViewProps {
   prices: any;
 }
 
-const AISignalCard = ({ symbol }: { symbol: string }) => {
+const AISignalCard = ({ symbol, index }: { symbol: string, index: number }) => {
   const [signal, setSignal] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -22,8 +22,11 @@ const AISignalCard = ({ symbol }: { symbol: string }) => {
         setLoading(false);
       }
     };
-    fetchSignal();
-  }, [symbol]);
+
+    // Staggered loading
+    const timer = setTimeout(fetchSignal, index * 12000); // 12 seconds per call to stay within 5/min limit effectively
+    return () => clearTimeout(timer);
+  }, [symbol, index]);
 
   if (loading) return (
     <div className="flex items-center gap-2 text-[10px] font-bold text-indigo-400">
@@ -34,20 +37,20 @@ const AISignalCard = ({ symbol }: { symbol: string }) => {
   if (!signal) return null;
 
   return (
-    <div className="flex flex-col gap-1 mt-3 pt-3 border-t border-indigo-50">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Sparkles className="w-3 h-4 text-indigo-500" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">AI SMART SIGNAL</span>
+    <div className="flex flex-col gap-1 mt-3 pt-3 border-t border-indigo-50/50">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Sparkles className="w-3 h-3 text-indigo-500" />
+          <span className="text-[9px] font-black uppercase tracking-widest text-indigo-600">AI SIGNAL</span>
         </div>
-        <div className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-          signal.signal.includes('Buy') ? 'bg-green-100 text-green-600' : 
-          signal.signal.includes('Sell') ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'
+        <div className={`text-[9px] font-black px-2 py-0.5 rounded-full shrink-0 ${
+          signal.signal.includes('Buy') ? 'bg-green-100/80 text-green-700' : 
+          signal.signal.includes('Sell') ? 'bg-red-100/80 text-red-700' : 'bg-gray-100 text-gray-600'
         }`}>
-          {signal.signal}
+          {signal.signal} ({signal.confidence}%)
         </div>
       </div>
-      <p className="text-[10px] text-gray-500 font-medium italic">"{signal.summary}"</p>
+      <p className="text-[10px] text-gray-500 font-semibold italic mt-0.5 leading-tight">"{signal.summary}"</p>
     </div>
   );
 };
@@ -131,7 +134,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ prices }) => {
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        {analytics.map((item) => (
+        {analytics.map((item, idx) => (
           <motion.div 
             key={item.symbol}
             whileHover={{ y: -2 }}
@@ -180,7 +183,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ prices }) => {
               </div>
             </div>
             
-            <AISignalCard symbol={item.symbol} />
+            <AISignalCard symbol={item.symbol} index={idx} />
           </motion.div>
         ))}
       </div>

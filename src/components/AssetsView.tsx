@@ -6,12 +6,14 @@ import { useTrading } from '../context/TradingContext';
 import { WithdrawView } from './WithdrawView';
 import { DepositView } from './DepositView';
 import { BuyView } from './BuyView';
+import { TransferView } from './TransferView';
+import { ReceiveView } from './ReceiveView';
 
 interface AssetsViewProps {
   prices: any;
   loading: boolean;
-  activeAction: 'none' | 'withdraw' | 'deposit' | 'buy';
-  onActionChange: (action: 'none' | 'withdraw' | 'deposit' | 'buy') => void;
+  activeAction: 'none' | 'withdraw' | 'deposit' | 'buy' | 'transfer' | 'receive';
+  onActionChange: (action: 'none' | 'withdraw' | 'deposit' | 'buy' | 'transfer' | 'receive') => void;
 }
 
 export function AssetsView({ prices, loading, activeAction, onActionChange }: AssetsViewProps) {
@@ -136,11 +138,18 @@ export function AssetsView({ prices, loading, activeAction, onActionChange }: As
                 <span className="text-xs font-bold text-gray-700">Withdraw</span>
             </button>
             <button 
-              onClick={() => onActionChange('buy')}
+              onClick={() => onActionChange('transfer')}
               className="flex-1 bg-white border border-gray-100 p-4 rounded-2xl flex flex-col items-center gap-2 shadow-sm hover:border-cyan-200 transition-all group"
             >
-                <div className="bg-purple-50 p-2 rounded-xl group-hover:scale-110 transition-transform"><CreditCard className="text-purple-600 w-5 h-5" /></div>
-                <span className="text-xs font-bold text-gray-700">Buy</span>
+                <div className="bg-indigo-50 p-2 rounded-xl group-hover:scale-110 transition-transform"><CreditCard className="text-indigo-600 w-5 h-5" /></div>
+                <span className="text-xs font-bold text-gray-700">Transfer</span>
+            </button>
+            <button 
+              onClick={() => onActionChange('receive')}
+              className="flex-1 bg-white border border-gray-100 p-4 rounded-2xl flex flex-col items-center gap-2 shadow-sm hover:border-cyan-200 transition-all group"
+            >
+                <div className="bg-emerald-50 p-2 rounded-xl group-hover:scale-110 transition-transform"><CreditCard className="text-emerald-600 w-5 h-5" /></div>
+                <span className="text-xs font-bold text-gray-700">Receive</span>
             </button>
         </motion.div>
       </div>
@@ -165,7 +174,7 @@ export function AssetsView({ prices, loading, activeAction, onActionChange }: As
           >
             <div className="p-6 flex justify-between items-center border-b border-gray-100">
                <h3 className="font-black text-lg tracking-tight uppercase">
-                {activeAction === 'withdraw' ? 'WITHDRAW FUNDS' : activeAction === 'deposit' ? 'DEPOSIT FUNDS' : 'QUICK BUY'}
+                {activeAction === 'withdraw' ? 'WITHDRAW FUNDS' : activeAction === 'deposit' ? 'DEPOSIT FUNDS' : activeAction === 'transfer' ? 'TRANSFER FUNDS' : activeAction === 'receive' ? 'RECEIVE FUNDS' : 'QUICK BUY'}
                </h3>
                <button 
                 onClick={() => onActionChange('none')}
@@ -177,6 +186,8 @@ export function AssetsView({ prices, loading, activeAction, onActionChange }: As
             <div className="flex-1">
               {activeAction === 'withdraw' && <WithdrawView />}
               {activeAction === 'deposit' && <DepositView />}
+              {activeAction === 'transfer' && <TransferView />}
+              {activeAction === 'receive' && <ReceiveView />}
               {activeAction === 'buy' && <BuyView />}
             </div>
           </motion.div>

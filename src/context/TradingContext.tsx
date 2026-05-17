@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useFirebase } from './FirebaseContext';
+import { doc, onSnapshot, collection, query, where, runTransaction, serverTimestamp, addDoc } from 'firebase/firestore';
 
 interface Position {
   symbol: string;
@@ -35,102 +37,153 @@ interface TradingContextType {
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
 
 export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [balance, setBalance] = useState(10000); // 10,000 USDT Initial
+  const { auth, db } = useFirebase();
+  const [balance, setBalance] = useState(0); 
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
 
-  // Persistent storage
+  // Real-time synchronization
   useEffect(() => {
-    const saved = localStorage.getItem('trading_data_v2');
-    if (saved) {
-      const { balance: sBalance, positions: sPositions, orders: sOrders } = JSON.parse(saved);
-      setBalance(sBalance !== undefined ? sBalance : 10000);
-      setPositions(sPositions || []);
-      setOrders(sOrders || []);
-    }
-  }, []);
+    if (!auth.currentUser) return;
+    
+    // Listen to user balance
+    const userWalletRef = doc(db, 'wallets', auth.currentUser.uid);
+    const unsubscribeWallet = onSnapshot(userWalletRef, (doc) => {
+        if (doc.exists()) {
+            setBalance(doc.data().balance || 0);
+        }
+    });
 
-  useEffect(() => {
-    localStorage.setItem('trading_data_v2', JSON.stringify({ balance, positions, orders }));
-  }, [balance, positions, orders]);
+    // Listen to user transactions
+    const q = query(
+        collection(db, 'transactions'),
+        where('userId', '==', auth.currentUser.uid)
+    );
+    const unsubscribeTransactions = onSnapshot(q, (snapshot) => {
+        const newOrders: Order[] = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        } as Order));
+        setOrders(newOrders);
+    });
 
-  const buyAsset = (symbol: string, amount: number, price: number) => {
+    return () => {
+        unsubscribeWallet();
+        unsubscribeTransactions();
+    };
+  }, [auth.currentUser, db]);
+
+  const buyAsset = async (symbol: string, amount: number, price: number): Promise<boolean> => {
+    if (!auth.currentUser) return false;
     const cost = amount * price;
     if (balance < cost) return false;
 
-    setBalance(prev => prev - cost);
-    setPositions(prev => {
-      const existing = prev.find(p => p.symbol === symbol);
-      if (existing) {
-        const totalAmount = existing.amount + amount;
-        const avgPrice = (existing.amount * existing.entryPrice + cost) / totalAmount;
-        return prev.map(p => p.symbol === symbol ? { ...p, amount: totalAmount, entryPrice: avgPrice } : p);
-      }
-      return [...prev, { symbol, amount, entryPrice: price, type: 'buy', timestamp: Date.now() }];
-    });
+    try {
+        const walletRef = doc(db, 'wallets', auth.currentUser.uid);
+        await runTransaction(db, async (transaction) => {
+            const wallet = await transaction.get(walletRef);
+            if (!wallet.exists()) throw new Error('Wallet not found');
+            const data = wallet.data();
+            if ((data.balance || 0) < cost) throw new Error('Insufficient balance');
 
-    setOrders(prev => [{
-      id: Math.random().toString(36).substr(2, 9),
-      symbol,
-      amount,
-      price,
-      type: 'buy',
-      timestamp: Date.now(),
-      status: 'filled'
-    }, ...prev]);
-
-    return true;
+            transaction.update(walletRef, { balance: (data.balance || 0) - cost });
+            
+            const transactionRef = doc(collection(db, 'transactions'));
+            transaction.set(transactionRef, {
+                userId: auth.currentUser!.uid,
+                symbol,
+                amount,
+                price,
+                type: 'buy',
+                status: 'filled',
+                timestamp: serverTimestamp()
+            });
+        });
+        return true;
+    } catch(error) {
+        console.error(error);
+        return false;
+    }
   };
 
-  const sellAsset = (symbol: string, amount: number, price: number) => {
+  const sellAsset = async (symbol: string, amount: number, price: number): Promise<boolean> => {
+    if (!auth.currentUser) return false;
     const position = positions.find(p => p.symbol === symbol);
     if (!position || position.amount < amount) return false;
 
-    const realizedPnl = (price - position.entryPrice) * amount;
     const proceeds = amount * price;
-    
-    setBalance(prev => prev + proceeds);
-    setPositions(prev => {
-      const newPositions = prev.map(p => {
-        if (p.symbol === symbol) {
-          return { ...p, amount: p.amount - amount };
-        }
-        return p;
-      }).filter(p => p.amount > 0);
-      return newPositions;
-    });
 
-    setOrders(prev => [{
-      id: Math.random().toString(36).substr(2, 9),
-      symbol,
-      amount,
-      price,
-      type: 'sell',
-      pnl: realizedPnl,
-      timestamp: Date.now(),
-      status: 'filled'
-    }, ...prev]);
+    try {
+        const walletRef = doc(db, 'wallets', auth.currentUser.uid);
+        await runTransaction(db, async (transaction) => {
+            const wallet = await transaction.get(walletRef);
+            if (!wallet.exists()) throw new Error('Wallet not found');
+            const data = wallet.data();
 
-    return true;
+            transaction.update(walletRef, { balance: (data.balance || 0) + proceeds });
+            
+            const transactionRef = doc(collection(db, 'transactions'));
+            transaction.set(transactionRef, {
+                userId: auth.currentUser!.uid,
+                symbol,
+                amount,
+                price,
+                type: 'sell',
+                status: 'filled',
+                timestamp: serverTimestamp()
+            });
+        });
+        
+        // Update local positions
+        setPositions(prev => {
+           const newPositions = prev.map(p => {
+             if (p.symbol === symbol) {
+               return { ...p, amount: p.amount - amount };
+             }
+             return p;
+           }).filter(p => p.amount > 0);
+           return newPositions;
+        });
+
+        return true;
+    } catch(error) {
+        console.error(error);
+        return false;
+    }
   };
 
-  const withdraw = (projectId: string, amount: number) => {
+  const withdraw = async (projectId: string, amount: number): Promise<boolean> => {
+    if (!auth.currentUser) return false;
     if (balance < amount || amount <= 0) return false;
 
-    setBalance(prev => prev - amount);
-    setOrders(prev => [{
-      id: Math.random().toString(36).substr(2, 9),
-      symbol: 'USDT',
-      amount,
-      price: 1,
-      type: 'sell', // Use sell type for withdrawal
-      timestamp: Date.now(),
-      status: 'filled',
-      pnl: 0,
-      metadata: { type: 'withdrawal', projectId }
-    } as any, ...prev]);
+    try {
+        const walletRef = doc(db, 'wallets', auth.currentUser.uid);
+        await runTransaction(db, async (transaction) => {
+            const wallet = await transaction.get(walletRef);
+            if (!wallet.exists()) throw new Error('Wallet not found');
+            const data = wallet.data();
 
-    return true;
+            if ((data.balance || 0) < amount) throw new Error('Insufficient balance');
+
+            transaction.update(walletRef, { balance: (data.balance || 0) - amount });
+            
+            const transactionRef = doc(collection(db, 'transactions'));
+            transaction.set(transactionRef, {
+                userId: auth.currentUser!.uid,
+                symbol: 'USDT',
+                amount,
+                price: 1,
+                type: 'withdraw',
+                status: 'filled',
+                metadata: { projectId },
+                timestamp: serverTimestamp()
+            });
+        });
+        return true;
+    } catch(error) {
+        console.error(error);
+        return false;
+    }
   };
 
   const clearHistory = () => {

@@ -106,15 +106,17 @@ export function Hero({ prices, onTabChange }: { prices?: any; onTabChange: (tab:
         </div>
       </div>
 
-      <div className="flex justify-between gap-2">
+      <div className="flex justify-between items-center gap-1">
            {heroMenu.map(item => (
                <button 
                 key={item.label} 
                 onClick={() => onTabChange(item.tab)}
-                className="flex flex-col items-center gap-2 group outline-none"
+                className="flex flex-col items-center gap-1.5 group outline-none flex-1 min-w-0"
                >
-                   <div className="bg-white/20 p-4 rounded-2xl group-hover:bg-white/30 group-active:scale-95 transition-all"><item.icon className="w-6 h-6" /></div>
-                   <span className="text-[10px] font-bold uppercase tracking-tight">{item.label}</span>
+                   <div className="bg-white/20 p-3 sm:p-4 rounded-2xl group-hover:bg-white/30 group-active:scale-95 transition-all">
+                     <item.icon className="w-5 h-5 sm:w-6 h-6" />
+                   </div>
+                   <span className="text-[8px] sm:text-[10px] font-bold uppercase tracking-tight truncate w-full text-center">{item.label}</span>
                </button>
            ))}
       </div>

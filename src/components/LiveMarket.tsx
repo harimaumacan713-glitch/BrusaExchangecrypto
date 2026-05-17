@@ -570,19 +570,19 @@ function OrderBook({ symbol }: { symbol: string }) {
       ) : (
         <div className="grid grid-cols-2 gap-px bg-gray-100/50 rounded-2xl overflow-hidden border border-gray-100">
           {/* Asks (Sell) */}
-          <div className="bg-white p-2">
-            <div className="grid grid-cols-2 text-[9px] font-black uppercase tracking-tighter text-gray-400 mb-2 px-2">
+          <div className="bg-white p-1 sm:p-2">
+            <div className="grid grid-cols-2 text-[8px] font-black uppercase tracking-tighter text-gray-400 mb-2 px-1">
               <span>Price</span>
               <span className="text-right">Size</span>
             </div>
             {displayedAsks.map((ask, i) => (
-              <div key={i} className="relative group overflow-hidden rounded-md my-0.5 px-2 py-1.5 transition-colors hover:bg-gray-50">
+              <div key={i} className="relative group overflow-hidden rounded-md my-0.5 px-1 py-1 transition-colors hover:bg-gray-50">
                 <div 
-                  className="absolute inset-y-0 right-0 bg-red-50 transition-all duration-500" 
-                  style={{ width: `${ask.depthPercent}%`, opacity: 0.6 }}
+                  className="absolute inset-y-0 right-0 bg-red-50/50 transition-all duration-500" 
+                  style={{ width: `${ask.depthPercent}%` }}
                 />
-                <div className="relative flex justify-between text-[11px] font-mono">
-                  <span className="text-red-500 font-bold">
+                <div className="relative flex justify-between text-[9px] sm:text-[11px] font-mono">
+                  <span className="text-red-500 font-bold truncate">
                     {ask.price.toLocaleString('id-ID', { maximumFractionDigits: 0 })}
                   </span>
                   <span className="text-gray-600 font-medium">
@@ -594,19 +594,19 @@ function OrderBook({ symbol }: { symbol: string }) {
           </div>
 
           {/* Bids (Buy) */}
-          <div className="bg-white p-2 border-l border-gray-100">
-            <div className="grid grid-cols-2 text-[9px] font-black uppercase tracking-tighter text-gray-400 mb-2 px-2">
+          <div className="bg-white p-1 sm:p-2 border-l border-gray-100">
+            <div className="grid grid-cols-2 text-[8px] font-black uppercase tracking-tighter text-gray-400 mb-2 px-1">
               <span>Price</span>
               <span className="text-right">Size</span>
             </div>
             {bidsWithDepth.map((bid, i) => (
-              <div key={i} className="relative group overflow-hidden rounded-md my-0.5 px-2 py-1.5 transition-colors hover:bg-gray-50">
+              <div key={i} className="relative group overflow-hidden rounded-md my-0.5 px-1 py-1 transition-colors hover:bg-gray-50">
                 <div 
-                  className="absolute inset-y-0 left-0 bg-green-50 transition-all duration-500" 
-                  style={{ width: `${bid.depthPercent}%`, opacity: 0.6 }}
+                  className="absolute inset-y-0 left-0 bg-green-50/50 transition-all duration-500" 
+                  style={{ width: `${bid.depthPercent}%` }}
                 />
-                <div className="relative flex justify-between text-[11px] font-mono">
-                  <span className="text-green-500 font-bold">
+                <div className="relative flex justify-between text-[9px] sm:text-[11px] font-mono">
+                  <span className="text-green-500 font-bold truncate">
                     {bid.price.toLocaleString('id-ID', { maximumFractionDigits: 0 })}
                   </span>
                   <span className="text-gray-600 font-medium">
