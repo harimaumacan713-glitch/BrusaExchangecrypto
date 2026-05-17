@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import { useTrading } from '../context/TradingContext';
 
 export function Hero({ prices, onTabChange }: { prices?: any; onTabChange: (tab: any) => void }) {
-  const { balance, positions, getTotalValue, totalRealizedPnl } = useTrading();
+  const { balance, positions, getTotalValue, getUnrealizedPnl, totalRealizedPnl } = useTrading();
   
   const currentPricesUsdt: Record<string, number> = {};
   if (prices && prices.RAW) {
@@ -14,14 +14,11 @@ export function Hero({ prices, onTabChange }: { prices?: any; onTabChange: (tab:
     });
   }
 
-  const totalValueUsdt = getTotalValue(currentPricesUsdt);
-  const totalValueIdr = totalValueUsdt * 16150;
+  const totalValueIdr = getTotalValue(currentPricesUsdt);
+  const totalValueUsdt = totalValueIdr / 16150;
   
-  const totalUnrealizedPnlUsdt = positions.reduce((acc, pos) => {
-    const currentPrice = currentPricesUsdt[pos.symbol] || pos.entryPrice;
-    return acc + (pos.amount * (currentPrice - pos.entryPrice));
-  }, 0);
-  const totalUnrealizedPnlIdr = totalUnrealizedPnlUsdt * 16150;
+  const totalUnrealizedPnlIdr = getUnrealizedPnl(currentPricesUsdt);
+  const totalUnrealizedPnlUsdt = totalUnrealizedPnlIdr / 16150;
 
   const totalPerformanceUsdt = totalValueUsdt - 10000; // 10k USDT initial
   const perfPercent = (totalPerformanceUsdt / 10000) * 100;

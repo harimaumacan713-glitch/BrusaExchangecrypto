@@ -89,7 +89,7 @@ export function Portfolio({ prices, loading }: { prices: any; loading: boolean }
   }, [prices, positions, loading]);
 
   const totalUnrealizedPnlIdr = assets.reduce((acc, asset) => acc + asset.rawPnlIdr, 0);
-  const balanceIdr = balance * 16150;
+  const balanceIdr = balance;
 
   return (
     <div className="px-6">
@@ -205,7 +205,7 @@ export function Portfolio({ prices, loading }: { prices: any; loading: boolean }
                     </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-bold text-gray-900">${balance.toLocaleString()} USDT</div>
+                  <div className="font-bold text-gray-900">${useTrading().balanceUsdt.toLocaleString()} USDT</div>
                   <div className="text-[9px] font-black text-cyan-600 uppercase">≈ IDR {balanceIdr.toLocaleString('id-ID')}</div>
                 </div>
             </div>
@@ -213,3 +213,4 @@ export function Portfolio({ prices, loading }: { prices: any; loading: boolean }
     </div>
   );
 }
+

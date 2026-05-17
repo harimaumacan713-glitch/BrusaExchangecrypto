@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Shield, Lock, Bell, Eye, Fingerprint, ChevronRight, Settings, Smartphone, Key, Copy, Check } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useFirebase } from '../context/FirebaseContext';
-import { query, collection, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { query, collection, where, orderBy, onSnapshot, doc } from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
 
 const menuItems = [
   { icon: Fingerprint, label: 'Biometric Lock', sub: 'Enable FaceID/Fingerprint', active: true },
@@ -16,15 +17,36 @@ export function SecureView() {
   const { auth, db } = useFirebase();
   const [copied, setCopied] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
+  const [balance, setBalance] = useState<number>(0);
   const uid = auth.currentUser?.uid || 'Not logged in';
 
   React.useEffect(() => {
     if (!auth.currentUser) return;
-    const q = query(collection(db, 'transfer_masuk'), where('penerimaUid', '==', auth.currentUser.uid), orderBy('timestamp', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    
+    // Fetch History
+    const q = query(collection(db, 'transfer_masuk'), where('penerimaUid', '==', auth.currentUser.uid));
+    const unsubscribeHistory = onSnapshot(q, (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Sort client-side to avoid requiring a composite index
+      docs.sort((a: any, b: any) => {
+        const timeA = a.timestamp?.seconds || 0;
+        const timeB = b.timestamp?.seconds || 0;
+        return timeB - timeA;
+      });
+      setHistory(docs);
     });
-    return () => unsubscribe();
+
+    // Fetch User Profile for Balance
+    const unsubscribeUser = onSnapshot(doc(db, 'users', auth.currentUser.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        setBalance(docSnap.data()?.balance || 0);
+      }
+    });
+
+    return () => {
+        unsubscribeHistory();
+        unsubscribeUser();
+    };
   }, [auth.currentUser, db]);
 
   const copyUid = () => {
@@ -33,9 +55,26 @@ export function SecureView() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const formattedBalance = new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0
+  }).format(balance);
+
   return (
     <div className="px-6 py-4">
       <h2 className="font-bold text-2xl tracking-tight text-gray-900 mb-6">Security Hub</h2>
+
+      <div className="bg-gradient-to-br from-green-500 to-emerald-700 p-6 rounded-[32px] text-white shadow-xl mb-6 relative overflow-hidden">
+        <div className="relative z-10">
+          <div className="text-[10px] font-black uppercase tracking-[0.2em] text-green-100 mb-1">
+            Wallet Balance
+          </div>
+          <div className="text-4xl font-black tracking-tight mb-2 text-white drop-shadow-md">
+            {formattedBalance}
+          </div>
+        </div>
+      </div>
       
       <div className="bg-white p-6 rounded-[32px] border border-gray-100 shadow-sm mb-6">
         <div className="flex items-center justify-between mb-2">
@@ -104,7 +143,9 @@ export function SecureView() {
       </div>
 
       <div className="mt-8 pt-8 border-t border-gray-100">
-        <button className="w-full flex items-center justify-center gap-2 text-red-500 font-bold py-4 rounded-2xl hover:bg-red-50 transition-colors">
+        <button 
+            onClick={() => signOut(auth)}
+            className="w-full flex items-center justify-center gap-2 text-red-500 font-bold py-4 rounded-2xl hover:bg-red-50 transition-colors">
             Log Out
         </button>
       </div>

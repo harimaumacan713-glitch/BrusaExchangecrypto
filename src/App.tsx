@@ -5,6 +5,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth, db } from './lib/firebase';
+import { Login } from './components/Login';
 import { Hero } from './components/Hero';
 import { LiveMarket } from './components/LiveMarket';
 import { Portfolio } from './components/Portfolio';
@@ -34,16 +37,67 @@ const assetMeta = {
 import { TradingProvider } from './context/TradingContext';
 
 export default function App() {
+  const [user, setUser] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, async (user) => {
+      setUser(user);
+      
+      if (user) {
+        try {
+          const { doc, getDoc, setDoc, serverTimestamp } = await import('firebase/firestore');
+          
+          // Ensure realtime wallet exists
+          const walletRef = doc(db, 'wallets', user.uid);
+          const walletSnap = await getDoc(walletRef);
+          if (!walletSnap.exists()) {
+            await setDoc(walletRef, {
+              balance: 0,
+              currency: "IDR",
+              updatedAt: serverTimestamp()
+            });
+          }
+
+          // Ensure exchange wallet exists
+          const exchangeWalletRef = doc(db, 'exchange_wallets', user.uid);
+          const exchangeWalletSnap = await getDoc(exchangeWalletRef);
+          if (!exchangeWalletSnap.exists()) {
+            await setDoc(exchangeWalletRef, {
+              idr: 0,
+              btc: 0,
+              eth: 0,
+              updatedAt: serverTimestamp()
+            });
+          }
+          
+          // Update lastLoginAt
+          const userRef = doc(db, 'users', user.uid);
+          await setDoc(userRef, {
+            lastLoginAt: serverTimestamp()
+          }, { merge: true });
+
+        } catch (error) {
+          console.error("Error ensuring user data on auth state change:", error);
+        }
+      }
+      
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+
   return (
     <TradingProvider>
-      <AppContent />
+        {user ? <AppContent /> : <Login onLogin={() => setUser(auth.currentUser)} />}
     </TradingProvider>
   );
 }
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState<TabType>('home');
-  const [assetAction, setAssetAction] = useState<'none' | 'withdraw' | 'deposit' | 'buy'>('none');
+  const [assetAction, setAssetAction] = useState<'none' | 'withdraw' | 'deposit' | 'buy' | 'transfer' | 'receive' | 'exchange_transfer'>('none');
   const [prices, setPrices] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isInitializing, setIsInitializing] = useState(true);

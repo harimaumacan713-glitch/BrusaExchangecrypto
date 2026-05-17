@@ -1,6 +1,6 @@
 import React from 'react';
 import { Portfolio } from './Portfolio';
-import { TrendingUp, ArrowUpRight, ArrowDownRight, CreditCard, Banknote, Shield, Orbit, X } from 'lucide-react';
+import { TrendingUp, ArrowUpRight, ArrowDownRight, CreditCard, Banknote, Shield, Orbit, X, ArrowLeftRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTrading } from '../context/TradingContext';
 import { WithdrawView } from './WithdrawView';
@@ -8,16 +8,17 @@ import { DepositView } from './DepositView';
 import { BuyView } from './BuyView';
 import { TransferView } from './TransferView';
 import { ReceiveView } from './ReceiveView';
+import { ExchangeDepositView } from './ExchangeDepositView';
 
 interface AssetsViewProps {
   prices: any;
   loading: boolean;
-  activeAction: 'none' | 'withdraw' | 'deposit' | 'buy' | 'transfer' | 'receive';
-  onActionChange: (action: 'none' | 'withdraw' | 'deposit' | 'buy' | 'transfer' | 'receive') => void;
+  activeAction: 'none' | 'withdraw' | 'deposit' | 'buy' | 'transfer' | 'receive' | 'exchange_transfer';
+  onActionChange: (action: 'none' | 'withdraw' | 'deposit' | 'buy' | 'transfer' | 'receive' | 'exchange_transfer') => void;
 }
 
 export function AssetsView({ prices, loading, activeAction, onActionChange }: AssetsViewProps) {
-  const { getTotalValue } = useTrading();
+  const { getTotalValue, eWalletBalance } = useTrading();
   
   const currentPrices: Record<string, number> = {};
   if (prices && prices.RAW) {
@@ -74,6 +75,9 @@ export function AssetsView({ prices, loading, activeAction, onActionChange }: As
                 >
                   IDR {totalValue.toLocaleString('id-ID')}
                 </motion.div>
+                <div className="mt-2 flex items-center gap-2">
+                   <div className="text-[10px] font-bold text-cyan-400/80">E-Wallet: Rp {eWalletBalance.toLocaleString()}</div>
+                </div>
               </div>
               <div className="bg-white/10 backdrop-blur-xl p-3 rounded-2xl border border-white/20">
                 <Shield className="w-5 h-5 text-cyan-300" />
@@ -99,21 +103,29 @@ export function AssetsView({ prices, loading, activeAction, onActionChange }: As
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-8">
-          <div className="bg-gradient-to-br from-green-500 to-emerald-600 p-5 rounded-[28px] text-white shadow-lg shadow-green-500/20">
-            <div className="flex justify-between items-start mb-4">
-              <div className="p-2 bg-white/20 rounded-xl"><TrendingUp className="w-5 h-5" /></div>
-              <div className="text-[10px] font-bold uppercase py-1 px-2 bg-white/20 rounded-full">Top Gain</div>
+          <button 
+             onClick={() => onActionChange('exchange_transfer')}
+             className="bg-gradient-to-br from-cyan-600 to-blue-700 p-5 rounded-[28px] text-white shadow-lg shadow-cyan-500/20 text-left relative overflow-hidden group"
+          >
+            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+               <ArrowLeftRight className="w-12 h-12" />
             </div>
-            <div className="text-sm font-medium opacity-80">Profit (24h)</div>
-            <div className="text-xl font-bold">+Rp 1.420k</div>
-          </div>
+            <div className="flex justify-between items-start mb-4">
+              <div className="p-2 bg-white/20 rounded-xl"><ArrowLeftRight className="w-5 h-5" /></div>
+            </div>
+            <div className="text-sm font-black uppercase tracking-tight">Exchange</div>
+            <div className="text-[10px] font-bold opacity-60">Deposit to Trading</div>
+          </button>
 
-          <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-5 rounded-[28px] text-white shadow-lg shadow-blue-500/20">
+          <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-5 rounded-[28px] text-white shadow-lg shadow-indigo-500/20 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+               <Banknote className="w-12 h-12" />
+            </div>
             <div className="flex justify-between items-start mb-4">
               <div className="p-2 bg-white/20 rounded-xl"><Banknote className="w-5 h-5" /></div>
             </div>
-            <div className="text-sm font-medium opacity-80">Yield Rewards</div>
-            <div className="text-xl font-bold">Rp 84.500</div>
+            <div className="text-sm font-black uppercase tracking-tight">E-Wallet</div>
+            <div className="text-[10px] font-bold opacity-60">IDR {eWalletBalance.toLocaleString()}</div>
           </div>
         </div>
 
@@ -174,7 +186,11 @@ export function AssetsView({ prices, loading, activeAction, onActionChange }: As
           >
             <div className="p-6 flex justify-between items-center border-b border-gray-100">
                <h3 className="font-black text-lg tracking-tight uppercase">
-                {activeAction === 'withdraw' ? 'WITHDRAW FUNDS' : activeAction === 'deposit' ? 'DEPOSIT FUNDS' : activeAction === 'transfer' ? 'TRANSFER FUNDS' : activeAction === 'receive' ? 'RECEIVE FUNDS' : 'QUICK BUY'}
+                {activeAction === 'withdraw' ? 'WITHDRAW FUNDS' : 
+                 activeAction === 'deposit' ? 'DEPOSIT FUNDS' : 
+                 activeAction === 'transfer' ? 'TRANSFER FUNDS' : 
+                 activeAction === 'receive' ? 'RECEIVE FUNDS' : 
+                 activeAction === 'exchange_transfer' ? 'EXCHANGE FUND' : 'QUICK BUY'}
                </h3>
                <button 
                 onClick={() => onActionChange('none')}
@@ -189,6 +205,7 @@ export function AssetsView({ prices, loading, activeAction, onActionChange }: As
               {activeAction === 'transfer' && <TransferView />}
               {activeAction === 'receive' && <ReceiveView />}
               {activeAction === 'buy' && <BuyView />}
+              {activeAction === 'exchange_transfer' && <ExchangeDepositView />}
             </div>
           </motion.div>
         )}

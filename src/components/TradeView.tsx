@@ -7,7 +7,7 @@ import { ArrowDownUp, Info, ChevronDown, Wallet, Target, Zap, History, Clock, Ch
 import { useTrading } from '../context/TradingContext';
 
 export function TradeView({ prices, loading }: { prices: any; loading: boolean }) {
-  const { balance, buyAsset, sellAsset, positions, orders, getTotalValue } = useTrading();
+  const { balance, balanceUsdt, buyAsset, sellAsset, positions, orders, getTotalValue } = useTrading();
   
   const currentPricesUsdt: Record<string, number> = {};
   if (prices && prices.RAW) {
@@ -101,7 +101,7 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
           <div className="flex items-center gap-2 mr-1">
              <span className="text-[8px] font-black text-green-500 uppercase tracking-tighter">Equity (USDT)</span>
              <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">
-               Available: ${balance.toLocaleString()} USDT
+               Available: ${balanceUsdt.toLocaleString()} USDT
              </span>
           </div>
         </div>
@@ -134,7 +134,7 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
           <div className="flex justify-between text-sm text-gray-400 font-medium mb-4">
             <span>You Pay ({side === 'buy' ? 'USDT' : targetAsset})</span>
             <span className="flex items-center gap-1 font-bold text-gray-600">
-              {side === 'buy' ? `$ ${balance.toLocaleString()}` : `${targetAsset} ${currentPosition?.amount.toFixed(4) || '0.0000'}`}
+              {side === 'buy' ? `$ ${balanceUsdt.toLocaleString()}` : `${targetAsset} ${currentPosition?.amount.toFixed(4) || '0.0000'}`}
             </span>
           </div>
           <div className="flex justify-between items-center">
@@ -195,7 +195,7 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
             <span>You Receive ({side === 'buy' ? targetAsset : 'USDT'})</span>
             <div className="flex flex-col items-end">
               <span className="flex items-center gap-1 font-bold text-gray-600 text-right">
-                 {side === 'buy' ? `${targetAsset}: ${currentPosition ? currentPosition.amount.toFixed(4) : '0.0000'}` : `Balance: $${balance.toLocaleString()}`}
+                 {side === 'buy' ? `${targetAsset}: ${currentPosition ? currentPosition.amount.toFixed(4) : '0.0000'}` : `Balance: $${balanceUsdt.toLocaleString()}`}
               </span>
               {currentPosition && (
                 <span className={`text-[10px] font-bold ${unrealizedPnlUsdt >= 0 ? 'text-green-500' : 'text-red-500'}`}>

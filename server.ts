@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
@@ -41,70 +42,116 @@ async function startServer() {
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
   
-  app.use(express.json());
-
-  // API route for receiving transfer
-  app.post("/api/terima-saldo", async (req, res) => {
-    const { secretKey, penerimaUid, jumlah, senderUid } = req.body;
-
-    if (secretKey !== process.env.RAHASIA_TRANSFER_EKSTERNAL) {
-      // Log security issue
-      await db.collection('security_logs').add({
-        action: 'EXTERNAL_TRANSFER_FAILURE',
-        reason: 'INVALID_SECRET',
-        ip: req.ip,
-        timestamp: admin.firestore.FieldValue.serverTimestamp()
-      }).catch(console.error);
-
-      return res.status(403).json({ error: "Forbidden: Invalid Secret Key" });
+  app.use(cors());
+  app.use(express.json({ type: '*/*' }));
+  app.use(express.urlencoded({ extended: true }));
+  
+  // Custom middleware to handle JSON parse errors gracefully
+  app.use((err: any, req: any, res: any, next: any) => {
+    if (err instanceof SyntaxError && 'body' in err) {
+      console.error("JSON Parse Error:", err);
+      return res.status(400).json({ error: "Invalid JSON payload" });
     }
+    next();
+  });
 
-    if (!penerimaUid || typeof jumlah !== 'number' || jumlah <= 0) {
-      return res.status(400).json({ success: false, error: "Invalid recipientUid or amount" });
-    }
-
+  // API route for receiving transfer from external banking app
+  app.post(["/api/receive-transfer", "/api/terima-transfer"], async (req, res) => {
     try {
+      console.log("Headers:", req.headers);
+      console.log("Received transfer request payload:", req.body);
+      
+      let body: any = req.body || {};
+      if (typeof body === 'string') {
+        try {
+          body = JSON.parse(body);
+        } catch (e) {
+          // Ignore
+        }
+      }
+      
+      // Case insensitive extraction
+      const findKey = (obj: any, keyName: string) => {
+        const key = Object.keys(obj).find(k => k.toLowerCase() === keyName.toLowerCase());
+        return key ? obj[key] : undefined;
+      };
+
+      const penerimaUid = findKey(body, 'penerimauid');
+      const jumlah = findKey(body, 'jumlah');
+      const secretKey = findKey(body, 'secretkey');
+
+      const authHeader = req.headers.authorization || '';
+      const headerSecretKey = authHeader.replace(/^Bearer\s+/i, '').trim();
+      const providedSecret = headerSecretKey || secretKey;
+
+      const expectedSecret = process.env.RAHASIA_TRANSFER_EKSTERNAL || "reivbyteio4b7b3r3vrriy7tov889";
+
+      if (providedSecret !== expectedSecret) {
+        console.warn("External transfer failed due to invalid secret");
+        return res.status(401).json({ error: "Unauthorized: Invalid secret key" });
+      }
+
+      if (!penerimaUid || jumlah === undefined) {
+        return res.status(400).json({ error: "Kolom yang wajib diisi tidak tersedia", receivedBody: req.body });
+      }
+
+      const numericJumlah = typeof jumlah === 'string' ? parseFloat(jumlah) : jumlah;
+
+      if (typeof numericJumlah !== 'number' || isNaN(numericJumlah) || numericJumlah <= 0) {
+        console.warn("External transfer failed due to invalid params. Penerima:", penerimaUid, "Jumlah:", jumlah);
+        return res.status(400).json({ error: "Kolom yang wajib diisi tidak tersedia" });
+      }
+
       await db.runTransaction(async (transaction) => {
         const userRef = db.collection('users').doc(penerimaUid);
         const userSnap = await transaction.get(userRef);
         
         if (!userSnap.exists) {
+            console.warn("User not found:", penerimaUid);
             throw new Error('User not found');
         }
 
-        // Add balance
+        // Add balance to users profile model
         transaction.update(userRef, { 
-            balance: admin.firestore.FieldValue.increment(jumlah) 
+            balance: admin.firestore.FieldValue.increment(numericJumlah) 
         });
 
-        // Log transfer in transfer_masuk
-        const logRef = db.collection('transfer_masuk').doc();
-        transaction.set(logRef, {
+        // Add balance to realtime wallet model
+        const walletRef = db.collection('wallets').doc(penerimaUid);
+        const walletSnap = await transaction.get(walletRef);
+        if (walletSnap.exists) {
+            transaction.update(walletRef, {
+                balance: admin.firestore.FieldValue.increment(numericJumlah),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+
+        // Log transfer in 'transactions' collection as requested, and also 'transfer_masuk' for UI compatibility
+        const txRef = db.collection('transactions').doc();
+        transaction.set(txRef, {
             penerimaUid,
-            senderUid: senderUid || 'unknown',
-            jumlah,
+            jumlah: numericJumlah,
+            description: 'Transfer Masuk Eksternal',
+            type: 'deposit',
+            status: 'success',
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        const legacyLogRef = db.collection('transfer_masuk').doc();
+        transaction.set(legacyLogRef, {
+            penerimaUid,
+            senderUid: 'external',
+            jumlah: numericJumlah,
             status: 'success',
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
       });
-      res.status(200).json({ success: true, message: "Terjual diterima" });
+      
+      console.log("Transfer successful for user:", penerimaUid, "amount:", numericJumlah);
+      res.json({ success: true, sukses: true, message: "Transfer diterima" });
     } catch (error: any) {
       console.error('Transfer Error:', error);
-      // Log failed transaction
-      await db.collection('transfer_masuk').add({
-          penerimaUid,
-          senderUid: senderUid || 'unknown',
-          jumlah,
-          status: 'failed',
-          error: error.message,
-          timestamp: admin.firestore.FieldValue.serverTimestamp()
-      }).catch(console.error);
-
-      if (error.message === 'User not found') {
-        res.status(404).json({ success: false, error: error.message });
-      } else {
-        res.status(500).json({ success: false, error: error.message });
-      }
+      res.status(500).json({ error: error.message });
     }
   });
 

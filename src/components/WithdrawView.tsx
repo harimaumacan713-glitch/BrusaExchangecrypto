@@ -4,7 +4,7 @@ import { Landmark, ArrowRight, ShieldCheck, Cpu, Wallet, AlertCircle, CheckCircl
 import { useTrading } from '../context/TradingContext';
 
 export function WithdrawView() {
-  const { balance, withdraw } = useTrading();
+  const { balance, balanceUsdt, withdraw } = useTrading();
   const [amount, setAmount] = useState('');
   const [projectId, setProjectId] = useState('');
   const [status, setStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
@@ -59,7 +59,7 @@ export function WithdrawView() {
             </div>
             <div className="text-right">
               <div className="text-blue-100/60 text-[10px] font-black uppercase tracking-widest">Available Balance</div>
-              <div className="text-2xl font-black tracking-tight">${balance.toLocaleString()} <span className="text-sm opacity-60">USDT</span></div>
+              <div className="text-2xl font-black tracking-tight">${balanceUsdt.toLocaleString()} <span className="text-sm opacity-60">USDT</span></div>
             </div>
           </div>
           
@@ -114,7 +114,7 @@ export function WithdrawView() {
                />
                <button 
                  type="button"
-                 onClick={() => setAmount(balance.toString())}
+                 onClick={() => setAmount(balanceUsdt.toString())}
                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-indigo-500 hover:text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors uppercase"
                >
                  Max
