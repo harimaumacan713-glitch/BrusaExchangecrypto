@@ -1,11 +1,11 @@
 import React from 'react';
-import { Bell, User, Search, BookOpen, Repeat, MessageCircle, MessageSquare } from 'lucide-react';
+import { Bell, User, Search, BookOpen, Repeat, MessageCircle, MessageSquare, Orbit } from 'lucide-react';
 import { motion } from 'motion/react';
 
 import { useTrading } from '../context/TradingContext';
 
 export function Hero({ prices, onTabChange }: { prices?: any; onTabChange: (tab: any) => void }) {
-  const { balance, positions, getTotalValue, getUnrealizedPnl, totalRealizedPnl } = useTrading();
+  const { balance, positions, getTotalValue, getUnrealizedPnl, totalRealizedPnl, accountNumber } = useTrading();
   
   const currentPricesUsdt: Record<string, number> = {};
   if (prices && prices.RAW) {
@@ -55,17 +55,33 @@ export function Hero({ prices, onTabChange }: { prices?: any; onTabChange: (tab:
 
       <div className="relative z-10 flex flex-col">
         <div className="flex justify-between items-center mb-10">
-        <div className="flex bg-white/20 p-1 rounded-full backdrop-blur-md">
-            <button className="px-4 py-1 bg-white text-[#06b6d4] rounded-full text-xs font-bold shadow-sm">Trading</button>
-            <button className="px-4 py-1 text-white opacity-60 text-xs font-bold">Invest</button>
-        </div>
-        <div className="flex gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-white/20 backdrop-blur-md rounded-xl flex items-center justify-center border border-white/20">
+              <Orbit className="w-5 h-5 text-cyan-400" />
+            </div>
+            <span className="font-black tracking-tighter text-lg">AETHEREX</span>
+          </div>
+          <div className="flex gap-4 items-center">
             <Search className="w-5 h-5 text-white/70" />
             <div className="relative">
               <Bell className="w-5 h-5 text-white/70" />
               <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-400 rounded-full border border-cyan-500"></span>
             </div>
-            <User className="w-5 h-5 text-white/70" />
+            <div 
+              className="flex items-center gap-2 bg-white/10 rounded-full px-3 py-1 cursor-pointer hover:bg-white/20 transition group"
+              onClick={() => {
+                if (accountNumber) {
+                  navigator.clipboard.writeText(accountNumber);
+                  alert('Account Number copied!');
+                }
+              }}
+            >
+              <User className="w-4 h-4 text-white/90" />
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black leading-none">{accountNumber || 'Loading...'}</span>
+                <span className="text-[7px] text-white/50 uppercase tracking-widest leading-none mt-0.5 group-hover:text-cyan-300">Copy ID</span>
+              </div>
+            </div>
         </div>
       </div>
       

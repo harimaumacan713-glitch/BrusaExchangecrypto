@@ -1,14 +1,31 @@
-import React, { useState } from 'react';
-import { ArrowLeftRight, Loader2, Info, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeftRight, Loader2, Info, CheckCircle2, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTrading } from '../context/TradingContext';
+import { useFirebase } from '../context/FirebaseContext';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 
 export function ExchangeDepositView() {
   const { eWalletBalance, balance: exchangeBalance, depositToExchange, withdrawFromExchange } = useTrading();
+  const { auth, db } = useFirebase();
   const [mode, setMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [history, setHistory] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const q = query(
+      collection(db, 'external_transfers'),
+      where('receiverUid', '==', auth.currentUser.uid),
+      orderBy('timestamp', 'desc')
+    );
+    const unsub = onSnapshot(q, (snapshot) => {
+      setHistory(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, [auth.currentUser, db]);
 
   const handleTransfer = async () => {
     if (!amount || parseFloat(amount) <= 0) return;
@@ -146,6 +163,36 @@ export function ExchangeDepositView() {
                 Internal transfers between your wallets are processed instantly with zero fees.
             </p>
         </div>
+      </div>
+
+      {/* Inbox Pendanaan */}
+      <div className="pt-8 space-y-4">
+        <div className="flex items-center gap-2 mb-4">
+          <History className="w-5 h-5 text-gray-400" />
+          <h3 className="font-black text-gray-900">Riwayat Deposit (E-Wallet)</h3>
+        </div>
+        {history.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-6">Belum ada riwayat deposit masuk.</p>
+        ) : (
+          <div className="space-y-3">
+            {history.map(item => (
+              <div key={item.id} className="bg-gray-50 border border-gray-100 p-4 rounded-3xl flex justify-between items-center">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] uppercase font-black tracking-widest text-cyan-600">INCOMING DEPOSIT</span>
+                  <span className="font-bold text-sm text-gray-800">Deposit IDR {(item.jumlah || item.amount || 0).toLocaleString('id-ID')} dari Akun: {item.senderAccountNumber || 'Unknown'}</span>
+                  <span className="text-xs text-gray-400">
+                    {item.timestamp?.seconds ? new Date(item.timestamp.seconds * 1000).toLocaleString('id-ID') : 'Baru saja'}
+                  </span>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-[10px] font-bold px-2 py-1 bg-green-100 text-green-700 rounded-full">
+                    {item.status || 'SUCCESS'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

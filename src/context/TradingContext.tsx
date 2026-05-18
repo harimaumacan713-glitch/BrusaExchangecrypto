@@ -25,6 +25,7 @@ interface TradingContextType {
   balance: number; // This is IDR now
   balanceUsdt: number;
   eWalletBalance: number;
+  accountNumber: string | null;
   positions: Position[];
   orders: Order[];
   incomingNotification: { amount: number, fromName: string, type: 'transfer' | 'deposit' } | null;
@@ -46,6 +47,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const { auth, db } = useFirebase();
   const [balance, setBalance] = useState(0); // Exchange IDR
   const [eWalletBalance, setEWalletBalance] = useState(0); // E-Wallet IDR
+  const [accountNumber, setAccountNumber] = useState<string | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [incomingNotification, setIncomingNotification] = useState<{ amount: number, fromName: string, type: 'transfer' | 'deposit' } | null>(null);
@@ -67,6 +69,14 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     if (!auth.currentUser) return;
     
+    // Listen to user profile
+    const userProfileRef = doc(db, 'users', auth.currentUser.uid);
+    const unsubscribeProfile = onSnapshot(userProfileRef, (doc) => {
+        if (doc.exists()) {
+            setAccountNumber(doc.data().accountNumber || null);
+        }
+    });
+
     // Listen to e-wallet balance (wallets collection)
     const userWalletRef = doc(db, 'wallets', auth.currentUser.uid);
     const unsubscribeWallet = onSnapshot(userWalletRef, (doc) => {
@@ -129,6 +139,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
 
     return () => {
+        unsubscribeProfile();
         unsubscribeWallet();
         unsubscribeExchangeWallet();
         unsubscribePositions();
@@ -409,7 +420,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const totalRealizedPnl = orders.reduce((acc, order) => acc + (order.pnl || 0), 0);
 
   return (
-    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, positions, orders, incomingNotification, setIncomingNotification, totalRealizedPnl, buyAsset, sellAsset, withdraw, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl }}>
+    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, accountNumber, positions, orders, incomingNotification, setIncomingNotification, totalRealizedPnl, buyAsset, sellAsset, withdraw, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl }}>
       {children}
     </TradingContext.Provider>
   );
