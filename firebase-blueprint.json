@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "accountNumber": { "type": "string" },
+        "lastLoginAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Wallet": {
+      "title": "Main E-Wallet",
+      "description": "User's main IDR balance in e-wallet",
+      "type": "object",
+      "properties": {
+        "balance": { "type": "number" },
+        "currency": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ExchangeWallet": {
+      "title": "Exchange Wallet",
+      "description": "User's exchange/trading balances",
+      "type": "object",
+      "properties": {
+        "idr": { "type": "number" },
+        "btc": { "type": "number" },
+        "eth": { "type": "number" },
+        "sol": { "type": "number" },
+        "usdt": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ExternalTransfer": {
+      "title": "External Transfer",
+      "description": "Log of incoming transfers from e-wallet application",
+      "type": "object",
+      "properties": {
+        "receiverUid": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderEmail": { "type": "string" },
+        "jumlah": { "type": "number" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Transaction": {
+      "title": "Exchange Transaction",
+      "description": "Internal exchange trade logs",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "symbol": { "type": "string" },
+        "amount": { "type": "number" },
+        "price": { "type": "number" },
+        "type": { "type": "string" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/users": { "schema": "User", "description": "User profiles" },
+    "/wallets": { "schema": "Wallet", "description": "Global user wallets" },
+    "/exchange_wallets": { "schema": "ExchangeWallet", "description": "User exchange wallets" },
+    "/external_transfers": { "schema": "ExternalTransfer", "description": "Incoming transfers from external apps" },
+    "/transactions": { "schema": "Transaction", "description": "Exchange internal transaction logs" }
+  }
+}

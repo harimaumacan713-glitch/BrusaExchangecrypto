@@ -56,12 +56,32 @@ export function ExchangeDepositView() {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="p-5 bg-gray-50 border border-gray-100 rounded-3xl">
-          <div className="text-[10px] font-black tracking-widest uppercase text-gray-400 mb-1">E-Wallet</div>
-          <div className="text-lg font-black text-gray-900 truncate">Rp {eWalletBalance.toLocaleString()}</div>
-        </div>
-        <div className="p-5 bg-cyan-50 border border-cyan-100/50 rounded-3xl">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="p-5 bg-gray-50 border border-gray-100 rounded-3xl relative">
+            <div className="text-[10px] font-black tracking-widest uppercase text-gray-400 mb-1">E-Wallet</div>
+            <div className="text-lg font-black text-gray-900 truncate">Rp {eWalletBalance.toLocaleString()}</div>
+            {eWalletBalance === 0 && (
+              <button 
+                onClick={async () => {
+                  try {
+                    const { doc, updateDoc } = await import('firebase/firestore');
+                    const { db, auth } = await import('../lib/firebase');
+                    if (auth.currentUser) {
+                      await updateDoc(doc(db, 'wallets', auth.currentUser.uid), {
+                        balance: 100000000
+                      });
+                    }
+                  } catch (e) {
+                    console.error("Topup failed:", e);
+                  }
+                }}
+                className="absolute top-4 right-4 text-[10px] font-bold bg-gray-900 text-white px-2 py-1 rounded"
+              >
+                Top Up
+              </button>
+            )}
+          </div>
+          <div className="p-5 bg-cyan-50 border border-cyan-100/50 rounded-3xl">
           <div className="text-[10px] font-black tracking-widest uppercase text-cyan-600 mb-1">Exchange</div>
           <div className="text-lg font-black text-cyan-900 truncate">Rp {exchangeBalance.toLocaleString()}</div>
         </div>
@@ -105,7 +125,7 @@ export function ExchangeDepositView() {
 
       <button 
         onClick={handleTransfer}
-        disabled={loading || !amount || parseFloat(amount) <= 0}
+        disabled={loading || !amount || parseFloat(amount) <= 0 || (mode === 'deposit' ? parseFloat(amount) > eWalletBalance : parseFloat(amount) > exchangeBalance)}
         className={`group w-full p-5 ${mode === 'deposit' ? 'bg-gray-900' : 'bg-indigo-600'} text-white font-black rounded-[28px] shadow-2xl hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50`}
       >
         {loading ? <Loader2 className="animate-spin" /> : (

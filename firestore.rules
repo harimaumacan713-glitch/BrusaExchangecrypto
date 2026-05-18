@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId);
+    }
+
+    match /wallets/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId);
+    }
+
+    match /exchange_wallets/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId);
+      
+      match /positions/{symbol} {
+        allow read: if isOwner(userId);
+        allow create, update, delete: if isOwner(userId);
+      }
+    }
+
+    match /external_transfers/{txId} {
+      // Receiver can read their own received transfers
+      allow read: if isSignedIn() && resource.data.receiverUid == request.auth.uid;
+      // Allow creation for demo/sync simulation
+      allow create: if isSignedIn();
+    }
+
+    match /transactions/{txId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+    
+    match /activity_logs/{logId} {
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+    }
+  }
+}

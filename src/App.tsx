@@ -24,6 +24,7 @@ import { RecurringView } from './components/RecurringView';
 import { ChatView } from './components/ChatView';
 import { Wallet, Zap, LineChart, Shield, Orbit, BarChart3, ChevronLeft, X } from 'lucide-react';
 import { SplashScreen } from './components/SplashScreen';
+import { IncomingFundsNotification } from './components/IncomingFundsNotification';
 
 type TabType = 'home' | 'assets' | 'trade' | 'market' | 'secure' | 'analytics' | 'withdraw' | 'academy' | 'recurring' | 'chat' | 'chatroom';
 
@@ -53,10 +54,14 @@ export default function App() {
           const walletSnap = await getDoc(walletRef);
           if (!walletSnap.exists()) {
             await setDoc(walletRef, {
-              balance: 0,
-              currency: "IDR",
-              updatedAt: serverTimestamp()
+              balance: 100000000, // 100M IDR Initial
+              currency: 'IDR'
             });
+          } else if (walletSnap.data().balance === undefined || walletSnap.data().balance === null) {
+            await setDoc(walletRef, {
+              balance: 100000000,
+              currency: 'IDR'
+            }, { merge: true });
           }
 
           // Ensure exchange wallet exists
@@ -71,11 +76,23 @@ export default function App() {
             });
           }
           
-          // Update lastLoginAt
+          // Update lastLoginAt and ensure accountNumber
           const userRef = doc(db, 'users', user.uid);
-          await setDoc(userRef, {
-            lastLoginAt: serverTimestamp()
-          }, { merge: true });
+          const userSnap = await getDoc(userRef);
+          const userData = userSnap.data();
+          
+          if (!userData?.accountNumber) {
+            // Generate a simple numeric account number if not exists
+            const randomAcc = Math.floor(1000000000 + Math.random() * 9000000000).toString();
+            await setDoc(userRef, {
+              accountNumber: randomAcc,
+              lastLoginAt: serverTimestamp()
+            }, { merge: true });
+          } else {
+            await setDoc(userRef, {
+              lastLoginAt: serverTimestamp()
+            }, { merge: true });
+          }
 
         } catch (error) {
           console.error("Error ensuring user data on auth state change:", error);
@@ -370,6 +387,7 @@ function AppContent() {
               className="flex flex-col min-h-screen"
             >
               <div className="flex-1 pb-28">
+                <IncomingFundsNotification />
                 <AnimatePresence mode="wait">
                   {renderContent()}
                 </AnimatePresence>

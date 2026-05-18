@@ -27,6 +27,8 @@ interface TradingContextType {
   eWalletBalance: number;
   positions: Position[];
   orders: Order[];
+  incomingNotification: { amount: number, fromName: string, type: 'transfer' | 'deposit' } | null;
+  setIncomingNotification: (val: any) => void;
   totalRealizedPnl: number;
   withdraw: (projectId: string, amount: number) => Promise<boolean>;
   buyAsset: (symbol: string, amount: number, price: number) => Promise<boolean>;
@@ -46,6 +48,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [eWalletBalance, setEWalletBalance] = useState(0); // E-Wallet IDR
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [incomingNotification, setIncomingNotification] = useState<{ amount: number, fromName: string, type: 'transfer' | 'deposit' } | null>(null);
   const [usdtRate, setUsdtRate] = useState(16150);
 
   // Fetch exchange rate
@@ -64,7 +67,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     if (!auth.currentUser) return;
     
-    // Listen to e-wallet balance (original wallets collection)
+    // Listen to e-wallet balance (wallets collection)
     const userWalletRef = doc(db, 'wallets', auth.currentUser.uid);
     const unsubscribeWallet = onSnapshot(userWalletRef, (doc) => {
         if (doc.exists()) {
@@ -72,16 +75,24 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
     });
 
-    // Listen to exchange balance (new exchange_wallets collection)
+    // Listen to exchange balance (exchange_wallets collection)
     const exchangeWalletRef = doc(db, 'exchange_wallets', auth.currentUser.uid);
     const unsubscribeExchangeWallet = onSnapshot(exchangeWalletRef, (doc) => {
         if (doc.exists()) {
-            // Mapping 'idr' from exchange_wallets to 'balance' for trading
             setBalance(doc.data().idr || 0);
         }
     });
 
-    // Listen to user transactions
+    // Listen to exchange positions
+    const positionsRef = collection(db, 'exchange_wallets', auth.currentUser.uid, 'positions');
+    const unsubscribePositions = onSnapshot(positionsRef, (snapshot) => {
+        const newPositions: Position[] = snapshot.docs.map(doc => ({
+            ...doc.data()
+        } as Position));
+        setPositions(newPositions);
+    });
+
+    // Listen to user transactions (Outgoing & Incoming)
     const q = query(
         collection(db, 'transactions'),
         where('userId', '==', auth.currentUser.uid)
@@ -94,10 +105,35 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setOrders(newOrders);
     });
 
+    // NEW: Listen for incoming transfers from e-wallet (external_transfers)
+    const externalTxQ = query(
+        collection(db, 'external_transfers'),
+        where('receiverUid', '==', auth.currentUser.uid)
+    );
+    const unsubscribeExternal = onSnapshot(externalTxQ, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            if (change.type === "added") {
+                const data = change.doc.data();
+                const now = Date.now();
+                const txTime = data.timestamp?.toMillis ? data.timestamp.toMillis() : 0;
+                
+                if (txTime > now - 30000) {
+                    setIncomingNotification({
+                        amount: data.jumlah || data.amount || 0,
+                        fromName: data.senderEmail || 'E-Wallet Transfer',
+                        type: 'deposit'
+                    });
+                }
+            }
+        });
+    });
+
     return () => {
         unsubscribeWallet();
         unsubscribeExchangeWallet();
+        unsubscribePositions();
         unsubscribeTransactions();
+        unsubscribeExternal();
     };
   }, [auth.currentUser, db]);
 
@@ -108,21 +144,58 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (balance < costIdr) return false;
 
     try {
-        const exchangeWalletRef = doc(db, 'exchange_wallets', auth.currentUser.uid);
-        await runTransaction(db, async (transaction) => {
-            const wallet = await transaction.get(exchangeWalletRef);
-            if (!wallet.exists()) throw new Error('Exchange wallet not found');
-            const data = wallet.data();
-            if ((data.idr || 0) < costIdr) throw new Error('Insufficient balance');
+        const uid = auth.currentUser.uid;
+        const exchangeWalletRef = doc(db, 'exchange_wallets', uid);
+        const positionRef = doc(db, 'exchange_wallets', uid, 'positions', symbol);
 
-            transaction.update(exchangeWalletRef, { idr: (data.idr || 0) - costIdr });
+        await runTransaction(db, async (transaction) => {
+            const walletDoc = await transaction.get(exchangeWalletRef);
+            const positionDoc = await transaction.get(positionRef);
+
+            if (!walletDoc.exists()) throw new Error('Exchange wallet not found');
+            const walletData = walletDoc.data();
+            if ((walletData.idr || 0) < costIdr) throw new Error('Insufficient IDR balance');
+
+            // 1. Update main exchange wallet (Aggregated balance)
+            const currentCryptoBalance = walletData[symbol.toLowerCase()] || 0;
+            transaction.update(exchangeWalletRef, { 
+                idr: (walletData.idr || 0) - costIdr,
+                [symbol.toLowerCase()]: currentCryptoBalance + amount,
+                updatedAt: serverTimestamp()
+            });
             
+            // 2. Update specific position (for entry price tracking)
+            let newPosition;
+            if (positionDoc.exists()) {
+                const posData = positionDoc.data();
+                const totalCost = (posData.amount * posData.entryPrice) + (amount * price);
+                const totalAmount = posData.amount + amount;
+                newPosition = {
+                    symbol,
+                    amount: totalAmount,
+                    entryPrice: totalCost / totalAmount,
+                    type: 'buy',
+                    timestamp: Date.now()
+                };
+                transaction.update(positionRef, newPosition);
+            } else {
+                newPosition = {
+                    symbol,
+                    amount,
+                    entryPrice: price,
+                    type: 'buy',
+                    timestamp: Date.now()
+                };
+                transaction.set(positionRef, newPosition);
+            }
+
+            // 3. Log transaction
             const transactionRef = doc(collection(db, 'transactions'));
             transaction.set(transactionRef, {
-                userId: auth.currentUser!.uid,
+                userId: uid,
                 symbol,
                 amount,
-                price, // Still logging price in USDT
+                price,
                 type: 'buy',
                 status: 'filled',
                 timestamp: serverTimestamp()
@@ -130,7 +203,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
         return true;
     } catch(error) {
-        console.error(error);
+        console.error("Buy asset failed:", error);
         return false;
     }
   };
@@ -144,40 +217,57 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const proceedsIdr = proceedsUsdt * usdtRate;
 
     try {
-        const exchangeWalletRef = doc(db, 'exchange_wallets', auth.currentUser.uid);
-        await runTransaction(db, async (transaction) => {
-            const wallet = await transaction.get(exchangeWalletRef);
-            if (!wallet.exists()) throw new Error('Exchange wallet not found');
-            const data = wallet.data();
+        const uid = auth.currentUser.uid;
+        const exchangeWalletRef = doc(db, 'exchange_wallets', uid);
+        const positionRef = doc(db, 'exchange_wallets', uid, 'positions', symbol);
 
-            transaction.update(exchangeWalletRef, { idr: (data.idr || 0) + proceedsIdr });
-            
+        await runTransaction(db, async (transaction) => {
+            const walletDoc = await transaction.get(exchangeWalletRef);
+            const positionDoc = await transaction.get(positionRef);
+
+            if (!walletDoc.exists()) throw new Error('Exchange wallet not found');
+            if (!positionDoc.exists()) throw new Error('Position not found');
+
+            const walletData = walletDoc.data();
+            const posData = positionDoc.data();
+
+            if (posData.amount < amount) throw new Error('Insufficient crypto amount');
+
+            // 1. Update main exchange wallet
+            const currentCryptoBalance = walletData[symbol.toLowerCase()] || 0;
+            transaction.update(exchangeWalletRef, { 
+                idr: (walletData.idr || 0) + proceedsIdr,
+                [symbol.toLowerCase()]: Math.max(0, currentCryptoBalance - amount),
+                updatedAt: serverTimestamp()
+            });
+
+            // 2. Update/Delete position
+            if (posData.amount === amount) {
+                transaction.delete(positionRef);
+            } else {
+                transaction.update(positionRef, {
+                    amount: posData.amount - amount,
+                    timestamp: Date.now()
+                });
+            }
+
+            // 3. Log transaction
             const transactionRef = doc(collection(db, 'transactions'));
+            const pnl = (price - posData.entryPrice) * amount;
             transaction.set(transactionRef, {
-                userId: auth.currentUser!.uid,
+                userId: uid,
                 symbol,
                 amount,
                 price,
                 type: 'sell',
                 status: 'filled',
+                pnl,
                 timestamp: serverTimestamp()
             });
         });
-        
-        // Update local positions
-        setPositions(prev => {
-           const newPositions = prev.map(p => {
-             if (p.symbol === symbol) {
-               return { ...p, amount: p.amount - amount };
-             }
-             return p;
-           }).filter(p => p.amount > 0);
-           return newPositions;
-        });
-
         return true;
     } catch(error) {
-        console.error(error);
+        console.error("Sell asset failed:", error);
         return false;
     }
   };
@@ -197,12 +287,12 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!wallet.exists()) throw new Error('E-Wallet not found');
         if (!exchangeWallet.exists()) throw new Error('Exchange wallet not found');
 
-        const currentBalance = wallet.data()?.balance || 0;
+        const currentBalance = Number(wallet.data()?.balance || 0);
         if (currentBalance < amount) throw new Error('Insufficient E-Wallet balance');
 
         transaction.update(walletRef, { balance: currentBalance - amount });
         transaction.update(exchangeWalletRef, { 
-          idr: (exchangeWallet.data()?.idr || 0) + amount,
+          idr: Number(exchangeWallet.data()?.idr || 0) + amount,
           updatedAt: serverTimestamp()
         });
 
@@ -237,12 +327,12 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (!wallet.exists()) throw new Error('E-Wallet not found');
         if (!exchangeWallet.exists()) throw new Error('Exchange wallet not found');
 
-        const currentExchangeBalance = exchangeWallet.data()?.idr || 0;
+        const currentExchangeBalance = Number(exchangeWallet.data()?.idr || 0);
         if (currentExchangeBalance < amount) throw new Error('Insufficient Exchange balance');
 
         transaction.update(exchangeWalletRef, { idr: currentExchangeBalance - amount });
         transaction.update(walletRef, { 
-          balance: (wallet.data()?.balance || 0) + amount,
+          balance: Number(wallet.data()?.balance || 0) + amount,
           updatedAt: serverTimestamp()
         });
 
@@ -319,7 +409,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const totalRealizedPnl = orders.reduce((acc, order) => acc + (order.pnl || 0), 0);
 
   return (
-    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, positions, orders, totalRealizedPnl, buyAsset, sellAsset, withdraw, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl }}>
+    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, positions, orders, incomingNotification, setIncomingNotification, totalRealizedPnl, buyAsset, sellAsset, withdraw, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl }}>
       {children}
     </TradingContext.Provider>
   );
