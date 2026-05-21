@@ -3,6 +3,7 @@ import { Landmark, Smartphone, QrCode, CreditCard, ChevronRight, AlertCircle, Lo
 import { motion } from 'motion/react';
 import { useFirebase } from '../context/FirebaseContext';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { useToast } from '../context/ToastContext';
 
 const METHODS = [
   { id: 'bank', name: 'Bank Transfer', icon: Landmark, color: 'bg-blue-500', desc: 'Permata, BCA, Mandiri, BRI' },
@@ -13,28 +14,45 @@ const METHODS = [
 
 export function DepositView() {
   const { auth, db } = useFirebase();
+  const { showToast } = useToast();
   const [amount, setAmount] = useState('');
   const [selectedMethod, setSelectedMethod] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleDeposit = async () => {
-    if (!amount || !selectedMethod || !auth.currentUser) return;
+    if (!auth.currentUser) {
+      showToast('Anda harus masuk untuk melakukan deposit.', 'error', 'DepositView-auth');
+      return;
+    }
+    if (!amount) {
+      showToast('Masukkan jumlah deposit terlebih dahulu.', 'error', 'DepositView-input');
+      return;
+    }
+    const val = parseFloat(amount);
+    if (isNaN(val) || val <= 0) {
+      showToast('Jumlah deposit tidak valid. Nominal harus lebih besar dari 0.', 'error', 'DepositView-input');
+      return;
+    }
+    if (!selectedMethod) {
+      showToast('Pilih metode pembayaran terlebih dahulu.', 'error', 'DepositView-input');
+      return;
+    }
     
     setLoading(true);
     try {
       await addDoc(collection(db, 'deposits'), {
         userId: auth.currentUser.uid,
-        amount: parseFloat(amount),
+        amount: val,
         method: selectedMethod,
         status: 'pending',
         createdAt: serverTimestamp()
       });
-      alert('Deposit request submitted successfully!');
+      showToast('Permintaan deposit berhasil dikirim! Silakan selesaikan pembayaran.', 'success');
       setAmount('');
       setSelectedMethod(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error submitting deposit:', error);
-      alert('Failed to submit deposit request.');
+      showToast(`Gagal memproses permintaan deposit: ${error?.message || 'Koneksi terputus. Silakan coba beberapa saat lagi.'}`, 'error', 'DepositView-firebase');
     } finally {
       setLoading(false);
     }

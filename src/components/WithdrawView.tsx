@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Landmark, ArrowRight, ShieldCheck, Cpu, Wallet, AlertCircle, CheckCircle2, Orbit } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
+import { useToast } from '../context/ToastContext';
 
 export function WithdrawView() {
   const { balance, balanceUsdt, withdraw } = useTrading();
+  const { showToast } = useToast();
   const [amount, setAmount] = useState('');
   const [projectId, setProjectId] = useState('');
   const [withdrawMethod, setWithdrawMethod] = useState<'project' | 'bank' | 'ewallet'>('project');
@@ -36,19 +38,46 @@ export function WithdrawView() {
   const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
     if (withdrawMethod === 'project' && !projectId) {
-      setErrorMessage('Project ID is required');
+      const msg = 'Project ID wajib diisi untuk transfer antar-project.';
+      setErrorMessage(msg);
       setStatus('error');
+      showToast(msg, 'error', 'WithdrawView-projectId');
+      return;
+    }
+    if (withdrawMethod === 'bank' && !selectedBank) {
+      const msg = 'Silakan pilih bank tujuan penarikan.';
+      setErrorMessage(msg);
+      setStatus('error');
+      showToast(msg, 'error', 'WithdrawView-bankSelect');
+      return;
+    }
+    if (withdrawMethod === 'ewallet' && !selectedEWallet) {
+      const msg = 'Silakan pilih e-wallet tujuan penarikan.';
+      setErrorMessage(msg);
+      setStatus('error');
+      showToast(msg, 'error', 'WithdrawView-ewalletSelect');
       return;
     }
     if (withdrawMethod !== 'project' && !accountNumber) {
-      setErrorMessage('Account number is required');
+      const msg = 'Nomor rekening atau nomor telepon penerima wajib diisi.';
+      setErrorMessage(msg);
       setStatus('error');
+      showToast(msg, 'error', 'WithdrawView-accountNumber');
       return;
     }
     const val = parseFloat(amount);
     if (isNaN(val) || val <= 0) {
-      setErrorMessage('Enter a valid amount');
+      const msg = 'Silakan masukkan jumlah penarikan yang valid (harus lebih besar dari 0).';
+      setErrorMessage(msg);
       setStatus('error');
+      showToast(msg, 'error', 'WithdrawView-amount');
+      return;
+    }
+    if (val > balanceUsdt) {
+      const msg = `Saldo tidak mencukupi. Anda mencoba menarik ${val} USDT tetapi saldo Anda hanya ${balanceUsdt} USDT.`;
+      setErrorMessage(msg);
+      setStatus('error');
+      showToast(msg, 'error', 'WithdrawView-balance');
       return;
     }
 
@@ -57,18 +86,28 @@ export function WithdrawView() {
     // Simulate network delay
     await new Promise(r => setTimeout(r, 2000));
 
-    // Handle withdrawal logic based on method
-    const destination = withdrawMethod === 'project' ? projectId : accountNumber;
-    const success = withdraw(destination, val);
-    
-    if (success) {
-      setStatus('success');
-      setAmount('');
-      setProjectId('');
-      setAccountNumber('');
-    } else {
-      setErrorMessage('Insufficient balance or invalid amount');
+    try {
+      // Handle withdrawal logic based on method
+      const destination = withdrawMethod === 'project' ? projectId : accountNumber;
+      const success = await withdraw(destination, val);
+      
+      if (success) {
+        setStatus('success');
+        showToast('Penarikan dana berhasil diproses!', 'success');
+        setAmount('');
+        setProjectId('');
+        setAccountNumber('');
+      } else {
+        const msg = 'Penarikan gagal. Saldo tidak mencukupi atau terjadi kesalahan jaringan.';
+        setErrorMessage(msg);
+        setStatus('error');
+        showToast(msg, 'error', 'WithdrawView-exchange-withdraw');
+      }
+    } catch (err: any) {
+      const msg = `Kesalahan sistem: ${err?.message || 'Gagal memproses penarikan.'}`;
+      setErrorMessage(msg);
       setStatus('error');
+      showToast(msg, 'error', 'WithdrawView-server');
     }
   };
 

@@ -3,7 +3,7 @@ import { ArrowLeftRight, Loader2, Info, CheckCircle2, History } from 'lucide-rea
 import { motion, AnimatePresence } from 'motion/react';
 import { useTrading } from '../context/TradingContext';
 import { useFirebase } from '../context/FirebaseContext';
-import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 
 export function ExchangeDepositView() {
   const { eWalletBalance, balance: exchangeBalance, depositToExchange, withdrawFromExchange } = useTrading();
@@ -112,8 +112,6 @@ export function ExchangeDepositView() {
                 <button 
                   onClick={async () => {
                     try {
-                      const { doc, updateDoc } = await import('firebase/firestore');
-                      const { db, auth } = await import('../lib/firebase');
                       if (auth.currentUser) {
                         await updateDoc(doc(db, 'wallets', auth.currentUser.uid), {
                           balance: 100000000

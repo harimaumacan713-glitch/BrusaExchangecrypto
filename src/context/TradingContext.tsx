@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useFirebase } from './FirebaseContext';
-import { doc, onSnapshot, collection, query, where, runTransaction, serverTimestamp, addDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, runTransaction, serverTimestamp, addDoc, getDocs } from 'firebase/firestore';
 
 interface Position {
   symbol: string;
@@ -36,15 +36,17 @@ interface TradingContextType {
   balanceUsdt: number;
   eWalletBalance: number;
   accountNumber: string | null;
+  userAssetIps: Record<string, string> | null;
   positions: Position[];
   orders: Order[];
   externalTransfers: ExternalTransfer[];
-  incomingNotification: { amount: number, fromName: string, type: 'transfer' | 'deposit' } | null;
+  incomingNotification: { amount: number, fromName: string, type: 'transfer' | 'deposit' | 'crypto_transfer_received', symbol?: string } | null;
   setIncomingNotification: (val: any) => void;
   totalRealizedPnl: number;
   withdraw: (projectId: string, amount: number) => Promise<boolean>;
   buyAsset: (symbol: string, amount: number, price: number) => Promise<boolean>;
   sellAsset: (symbol: string, amount: number, price: number) => Promise<boolean>;
+  transferAsset: (symbol: string, recipientIp: string, amount: number, price: number) => Promise<boolean>;
   depositToExchange: (amount: number) => Promise<boolean>;
   withdrawFromExchange: (amount: number) => Promise<boolean>;
   clearHistory: () => void;
@@ -60,10 +62,11 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [balance, setBalance] = useState(0); // Exchange IDR
   const [eWalletBalance, setEWalletBalance] = useState(0); // E-Wallet IDR
   const [accountNumber, setAccountNumber] = useState<string | null>(null);
+  const [userAssetIps, setUserAssetIps] = useState<Record<string, string> | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [externalTransfers, setExternalTransfers] = useState<ExternalTransfer[]>([]);
-  const [incomingNotification, setIncomingNotification] = useState<{ amount: number, fromName: string, type: 'transfer' | 'deposit' } | null>(null);
+  const [incomingNotification, setIncomingNotification] = useState<{ amount: number, fromName: string, type: 'transfer' | 'deposit' | 'crypto_transfer_received', symbol?: string } | null>(null);
   const [usdtRate, setUsdtRate] = useState(16150);
 
   // Fetch exchange rate
@@ -88,7 +91,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const userProfileRef = doc(db, 'users', auth.currentUser.uid);
     const unsubscribeProfile = onSnapshot(userProfileRef, (doc) => {
         if (doc.exists()) {
-            setAccountNumber(doc.data().accountNumber || null);
+            const data = doc.data();
+            setAccountNumber(data.accountNumber || null);
+            setUserAssetIps({
+              BTC: data.btc_ip || '',
+              ETH: data.eth_ip || '',
+              SOL: data.sol_ip || '',
+              USDT: data.usdt_ip || '',
+              XRP: data.xrp_ip || ''
+            });
         }
     });
 
@@ -157,10 +168,18 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
                 const txTime = data.timestamp?.toMillis ? data.timestamp.toMillis() : 0;
                 
                 if (txTime > now - 30000) {
+                    let determinedType: 'transfer' | 'deposit' | 'crypto_transfer_received' = 'deposit';
+                    if (data.type === 'transfer') {
+                        determinedType = 'transfer';
+                    } else if (data.type === 'crypto_transfer_received') {
+                        determinedType = 'crypto_transfer_received';
+                    }
+
                     setIncomingNotification({
                         amount: data.jumlah || data.amount || 0,
-                        fromName: data.senderEmail || 'E-Wallet Transfer',
-                        type: 'deposit'
+                        fromName: data.senderEmail || data.senderName || 'E-Wallet Transfer',
+                        type: determinedType,
+                        symbol: data.symbol || undefined
                     });
                 }
             }
@@ -392,6 +411,146 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
+  const transferAsset = async (symbol: string, recipientIp: string, amount: number, price: number): Promise<boolean> => {
+    if (!auth.currentUser || amount <= 0 || !recipientIp) return false;
+    const cleanIp = recipientIp.trim();
+    const upSymbol = symbol.toUpperCase();
+    const lowSymbol = symbol.toLowerCase();
+
+    try {
+      const senderUid = auth.currentUser.uid;
+      
+      // 1. Find recipient by checking their specified asset IP address in the 'users' collection
+      const ipField = `${lowSymbol}_ip`;
+      const q = query(collection(db, 'users'), where(ipField, '==', cleanIp));
+      const querySnap = await getDocs(q);
+      
+      if (querySnap.empty) {
+        throw new Error(`Alamat IP Penerima untuk asset ${upSymbol} tidak ditemukan.`);
+      }
+      
+      const recipientDoc = querySnap.docs[0];
+      const recipientUid = recipientDoc.id;
+      const recipientName = recipientDoc.data().name || recipientDoc.data().email || 'Trader';
+
+      if (recipientUid === senderUid) {
+        throw new Error("Tidak dapat mengirim asset kepada diri sendiri.");
+      }
+
+      // References for Wallets
+      const senderWalletRef = doc(db, 'exchange_wallets', senderUid);
+      const recipientWalletRef = doc(db, 'exchange_wallets', recipientUid);
+      
+      // References for Positions
+      const senderPosRef = doc(db, 'exchange_wallets', senderUid, 'positions', upSymbol);
+      const recipientPosRef = doc(db, 'exchange_wallets', recipientUid, 'positions', upSymbol);
+
+      await runTransaction(db, async (transaction) => {
+        // Read stats first
+        const senderWallet = await transaction.get(senderWalletRef);
+        const recipientWallet = await transaction.get(recipientWalletRef);
+        const senderPos = await transaction.get(senderPosRef);
+        const recipientPos = await transaction.get(recipientPosRef);
+
+        if (!senderWallet.exists()) throw new Error('Dompet pengirim tidak ditemukan.');
+        if (!senderPos.exists()) throw new Error(`Anda tidak memiliki posisi untuk ${upSymbol}.`);
+
+        const senderPosData = senderPos.data();
+        if (senderPosData.amount < amount) {
+          throw new Error(`Saldo posisi ${upSymbol} tidak mencukupi. Tersedia: ${senderPosData.amount}`);
+        }
+
+        const senderWalletData = senderWallet.data();
+        const currentSenderBalance = senderWalletData[lowSymbol] || 0;
+        if (currentSenderBalance < amount) {
+          throw new Error(`Saldo dompet ${upSymbol} tidak mencukupi.`);
+        }
+
+        // Setup recipient wallet
+        const recipientWalletData = recipientWallet.exists() ? recipientWallet.data() : {};
+        const currentRecipientBalance = recipientWalletData[lowSymbol] || 0;
+
+        // Perform updates:
+        // Update sender wallet fields
+        transaction.update(senderWalletRef, {
+          [lowSymbol]: Math.max(0, currentSenderBalance - amount),
+          updatedAt: serverTimestamp()
+        });
+
+        // Update recipient wallet fields
+        transaction.set(recipientWalletRef, {
+          [lowSymbol]: currentRecipientBalance + amount,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+
+        // Update sender position
+        if (senderPosData.amount === amount) {
+          transaction.delete(senderPosRef);
+        } else {
+          transaction.update(senderPosRef, {
+            amount: senderPosData.amount - amount,
+            timestamp: Date.now()
+          });
+        }
+
+        // Update recipient position
+        if (recipientPos.exists()) {
+          const recipPosData = recipientPos.data();
+          const totalCost = (recipPosData.amount * recipPosData.entryPrice) + (amount * price);
+          const totalAmount = recipPosData.amount + amount;
+          transaction.update(recipientPosRef, {
+            amount: totalAmount,
+            entryPrice: totalCost / totalAmount,
+            timestamp: Date.now()
+          });
+        } else {
+          transaction.set(recipientPosRef, {
+            symbol: upSymbol,
+            amount: amount,
+            entryPrice: price,
+            type: 'buy',
+            timestamp: Date.now()
+          });
+        }
+
+        // Add transaction entry for sender
+        const txSenderRef = doc(collection(db, 'transactions'));
+        transaction.set(txSenderRef, {
+          userId: senderUid,
+          toId: recipientUid,
+          fromName: auth.currentUser?.email || 'Anonymous',
+          toName: recipientName,
+          symbol: upSymbol,
+          amount: amount,
+          price: price,
+          type: 'crypto_transfer_sent',
+          status: 'filled',
+          recipientIp: cleanIp,
+          timestamp: serverTimestamp()
+        });
+
+        // Add transfer entry in recipient's transaction / trigger notification
+        const txRecipRef = doc(collection(db, 'external_transfers'));
+        transaction.set(txRecipRef, {
+          senderUid: senderUid,
+          senderEmail: auth.currentUser?.email || 'Anonymous',
+          senderName: auth.currentUser?.displayName || 'Trader',
+          receiverUid: recipientUid,
+          jumlah: amount, // amount/worth in asset
+          symbol: upSymbol,
+          type: 'crypto_transfer_received',
+          senderIp: senderWallet.data()?.[lowSymbol + '_ip'] || '',
+          timestamp: serverTimestamp()
+        });
+      });
+
+      return true;
+    } catch (e: any) {
+      console.error("Asset transfer failed:", e);
+      throw e;
+    }
+  };
+
   const withdraw = async (projectId: string, amountUsdt: number): Promise<boolean> => {
     if (!auth.currentUser) return false;
     const amountIdr = amountUsdt * usdtRate;
@@ -450,7 +609,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const totalRealizedPnl = orders.reduce((acc, order) => acc + (order.pnl || 0), 0);
 
   return (
-    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, accountNumber, positions, orders, externalTransfers, incomingNotification, setIncomingNotification, totalRealizedPnl, buyAsset, sellAsset, withdraw, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl, usdtRate }}>
+    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, accountNumber, userAssetIps, positions, orders, externalTransfers, incomingNotification, setIncomingNotification, totalRealizedPnl, buyAsset, sellAsset, withdraw, transferAsset, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl, usdtRate }}>
       {children}
     </TradingContext.Provider>
   );

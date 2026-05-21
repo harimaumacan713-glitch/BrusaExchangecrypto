@@ -510,6 +510,73 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
             </div>
           </div>
 
+          {/* Active Position Real-Time Card */}
+          <AnimatePresence>
+            {currentPosition && (
+              <motion.div
+                initial={{ opacity: 0, y: -12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                className={`relative overflow-hidden bg-slate-900 border ${
+                  unrealizedPnlUsdt >= 0 ? 'border-emerald-500/35 shadow-emerald-950/20' : 'border-rose-500/35 shadow-rose-950/20'
+                } rounded-[28px] p-5 shadow-2xl transition-all duration-300`}
+              >
+                {/* Accent background glow */}
+                <div className={`absolute top-0 right-0 w-28 h-28 rounded-full blur-2xl opacity-10 ${
+                  unrealizedPnlUsdt >= 0 ? 'bg-emerald-400' : 'bg-rose-400'
+                }`} />
+
+                <div className="flex justify-between items-start relative z-10">
+                  <div>
+                    <span className="text-[9px] font-mono font-black text-cyan-400 bg-cyan-950/40 border border-cyan-800/40 px-2 py-0.5 rounded-md uppercase tracking-widest">
+                      Position Details
+                    </span>
+                    <h3 className="text-white text-lg font-black tracking-tight mt-2 flex items-center gap-1.5 leading-none">
+                      {currentPosition.amount.toFixed(4)} {targetAsset}
+                    </h3>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-[9.5px] font-mono font-bold text-slate-400 uppercase tracking-widest block leading-none mb-1">
+                      Unrealized PNL
+                    </span>
+                    <div className={`text-xl font-mono font-black mt-0.5 leading-none ${
+                      unrealizedPnlUsdt >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}>
+                      {unrealizedPnlUsdt >= 0 ? '+' : ''}${unrealizedPnlUsdt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                    </div>
+                    <div className={`text-xs font-mono font-extrabold mt-1 leading-none ${
+                      unrealizedPnlUsdt >= 0 ? 'text-emerald-500' : 'text-rose-500'
+                    }`}>
+                      {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-800/60 text-xs relative z-10">
+                  <div>
+                    <span className="text-slate-500 font-sans text-[10px] block uppercase tracking-widest font-black mb-0.5">Avg. Entry Price</span>
+                    <span className="text-slate-200 font-mono font-semibold">${currentPosition.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-500 font-sans text-[10px] block uppercase tracking-widest font-black mb-0.5">Asset Current Price</span>
+                    <span className="text-slate-200 font-mono font-semibold">${currentPriceUsdt.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+
+                {/* Progress-like visual bar representing relative growth */}
+                <div className="w-full h-1 bg-slate-950 rounded-full mt-4 overflow-hidden relative z-10">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      unrealizedPnlUsdt >= 0 ? 'bg-gradient-to-r from-emerald-500 to-teal-400' : 'bg-gradient-to-r from-rose-500 to-orange-400'
+                    }`} 
+                    style={{ width: `${Math.min(Math.max(50 + pnlPercent, 5), 95)}%` }}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="space-y-4">
             {/* From Section */}
             <motion.div 

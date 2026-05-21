@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, query, where, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -38,6 +38,7 @@ const assetMeta = {
 };
 
 import { TradingProvider } from './context/TradingContext';
+import { ToastProvider } from './context/ToastContext';
 
 export default function App() {
   const [user, setUser] = useState<any | null>(null);
@@ -49,8 +50,6 @@ export default function App() {
       
       if (user) {
         try {
-          const { doc, getDoc, setDoc, serverTimestamp } = await import('firebase/firestore');
-          
           // Ensure realtime wallet exists
           const walletRef = doc(db, 'wallets', user.uid);
           const walletSnap = await getDoc(walletRef);
@@ -78,23 +77,35 @@ export default function App() {
             });
           }
           
-          // Update lastLoginAt and ensure accountNumber
+          // Update lastLoginAt and ensure accountNumber and asset IP addresses
           const userRef = doc(db, 'users', user.uid);
           const userSnap = await getDoc(userRef);
           const userData = userSnap.data();
           
+          const updates: Record<string, any> = {
+            lastLoginAt: serverTimestamp()
+          };
+
           if (!userData?.accountNumber) {
-            // Generate a simple numeric account number if not exists
-            const randomAcc = Math.floor(1000000000 + Math.random() * 9000000000).toString();
-            await setDoc(userRef, {
-              accountNumber: randomAcc,
-              lastLoginAt: serverTimestamp()
-            }, { merge: true });
-          } else {
-            await setDoc(userRef, {
-              lastLoginAt: serverTimestamp()
-            }, { merge: true });
+            updates.accountNumber = Math.floor(1000000000 + Math.random() * 9000000000).toString();
           }
+          if (!userData?.btc_ip) {
+            updates.btc_ip = `10.101.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
+          }
+          if (!userData?.eth_ip) {
+            updates.eth_ip = `10.102.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
+          }
+          if (!userData?.sol_ip) {
+            updates.sol_ip = `10.103.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
+          }
+          if (!userData?.usdt_ip) {
+            updates.usdt_ip = `10.104.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
+          }
+          if (!userData?.xrp_ip) {
+            updates.xrp_ip = `10.105.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
+          }
+
+          await setDoc(userRef, updates, { merge: true });
 
         } catch (error) {
           console.error("Error ensuring user data on auth state change:", error);
@@ -108,11 +119,13 @@ export default function App() {
   if (loading) return <div className="flex items-center justify-center min-h-screen bg-slate-950 text-white font-sans">Loading...</div>;
 
   return (
-    <TradingProvider>
-        <div className="min-h-screen bg-slate-950 font-sans text-slate-100 selection:bg-cyan-500/30">
-          {user ? <AppContent /> : <Login onLogin={() => setUser(auth.currentUser)} />}
-        </div>
-    </TradingProvider>
+    <ToastProvider>
+      <TradingProvider>
+          <div className="min-h-screen bg-slate-950 font-sans text-slate-100 selection:bg-cyan-500/30">
+            {user ? <AppContent /> : <Login onLogin={() => setUser(auth.currentUser)} />}
+          </div>
+      </TradingProvider>
+    </ToastProvider>
   );
 }
 
@@ -122,6 +135,10 @@ function AppContent() {
   const [prices, setPrices] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isInitializing, setIsInitializing] = useState(true);
+
+  // Buffer and throttle high-frequency WebSocket price updates
+  const priceUpdatesBufferRef = useRef<Record<string, any>>({});
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleWithdrawClick = () => {
     setActiveTab('assets');
@@ -196,6 +213,69 @@ function AppContent() {
       });
     });
 
+    // Helper to flush current updates buffer to the state
+    const commitUpdates = () => {
+      setPrices((prevPrices: any) => {
+        if (!prevPrices || !prevPrices.RAW) return prevPrices;
+        const buffer = priceUpdatesBufferRef.current;
+        const symbols = Object.keys(buffer);
+        if (symbols.length === 0) return prevPrices;
+
+        const newRaw = { ...prevPrices.RAW };
+        const newDisplay = prevPrices.DISPLAY ? { ...prevPrices.DISPLAY } : {};
+        const usdtRate = newRaw.USDT?.IDR?.PRICE || 16150;
+
+        symbols.forEach((symbol) => {
+          const data = buffer[symbol];
+          let idrPrice = data.price;
+          let priceUsdt = data.price;
+
+          if (data.isStock) {
+            if (data.isIdx) {
+              priceUsdt = data.price / usdtRate;
+            } else {
+              idrPrice = data.price * usdtRate;
+            }
+          } else {
+            // Crypto - WSS data.price is ALREADY in IDR
+            idrPrice = data.price;
+            priceUsdt = data.price / usdtRate;
+          }
+          if (symbol === 'USDT') { idrPrice = data.price; priceUsdt = 1; }
+
+          newRaw[symbol] = {
+            ...newRaw[symbol],
+            IDR: {
+              ...(newRaw[symbol]?.IDR || {}),
+              PRICE: idrPrice,
+              PRICE_USDT: priceUsdt,
+              CHANGEPCT24HOUR: data.change || (newRaw[symbol]?.IDR?.CHANGEPCT24HOUR),
+              MKTCAP: data.mktcap || (newRaw[symbol]?.IDR?.MKTCAP),
+              VOLUME24HOUR: data.volume || (newRaw[symbol]?.IDR?.VOLUME24HOUR)
+            }
+          };
+
+          const isUsStock = data.isStock && !data.isIdx && !data.isIndex;
+          const formattedPrice = isUsStock
+            ? `$${data.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
+            : `Rp ${idrPrice.toLocaleString('id-ID')}`;
+
+          newDisplay[symbol] = {
+            ...newDisplay[symbol],
+            IDR: {
+              ...(newDisplay[symbol]?.IDR || {}),
+              PRICE: formattedPrice,
+              CHANGEPCT24HOUR: data.change ? parseFloat(data.change).toFixed(2) : (newDisplay[symbol]?.IDR?.CHANGEPCT24HOUR)
+            }
+          };
+        });
+
+        // Reset the buffer
+        priceUpdatesBufferRef.current = {};
+        return { ...prevPrices, RAW: newRaw, DISPLAY: newDisplay };
+      });
+    };
+
     // 3. Ultra Real-Time WebSocket sync from our server
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
@@ -205,60 +285,13 @@ function AppContent() {
       try {
         const message = JSON.parse(event.data);
         if (message.type === 'PRICE_UPDATE') {
-          setPrices((prevPrices: any) => {
-            if (!prevPrices || !prevPrices.RAW) return prevPrices;
-            const newRaw = { ...prevPrices.RAW };
-            const newDisplay = prevPrices.DISPLAY ? { ...prevPrices.DISPLAY } : {};
-            
-            const symbol = message.symbol;
-            const usdtRate = newRaw.USDT?.IDR?.PRICE || 16150;
-            const data = message;
-            
-            let idrPrice = data.price;
-            let priceUsdt = data.price;
-
-            // Handle logic exactly like Firestore sync
-            if (data.isStock) {
-              if (data.isIdx) {
-                priceUsdt = data.price / usdtRate;
-              } else {
-                idrPrice = data.price * usdtRate;
-              }
-            } else {
-              // Crypto - WSS data.price is ALREADY in IDR
-              idrPrice = data.price;
-              priceUsdt = data.price / usdtRate;
-            }
-            if (symbol === 'USDT') { idrPrice = data.price; priceUsdt = 1; }
-
-            newRaw[symbol] = {
-              ...newRaw[symbol],
-              IDR: {
-                ...(newRaw[symbol]?.IDR || {}),
-                PRICE: idrPrice,
-                PRICE_USDT: priceUsdt,
-                CHANGEPCT24HOUR: data.change || (newRaw[symbol]?.IDR?.CHANGEPCT24HOUR),
-                MKTCAP: data.mktcap || (newRaw[symbol]?.IDR?.MKTCAP),
-                VOLUME24HOUR: data.volume || (newRaw[symbol]?.IDR?.VOLUME24HOUR)
-              }
-            };
-
-            const isUsStock = data.isStock && !data.isIdx && !data.isIndex;
-            const formattedPrice = isUsStock
-              ? `$${data.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
-              : `Rp ${idrPrice.toLocaleString('id-ID')}`;
-
-            newDisplay[symbol] = {
-              ...newDisplay[symbol],
-              IDR: {
-                ...(newDisplay[symbol]?.IDR || {}),
-                PRICE: formattedPrice,
-                CHANGEPCT24HOUR: data.change ? parseFloat(data.change).toFixed(2) : (newDisplay[symbol]?.IDR?.CHANGEPCT24HOUR)
-              }
-            };
-
-            return { ...prevPrices, RAW: newRaw, DISPLAY: newDisplay };
-          });
+          priceUpdatesBufferRef.current[message.symbol] = message;
+          if (!updateTimeoutRef.current) {
+            updateTimeoutRef.current = setTimeout(() => {
+              commitUpdates();
+              updateTimeoutRef.current = null;
+            }, 300); // Batch/throttle pricing changes in 300ms windows
+          }
         }
       } catch(e) {
         // ignore
@@ -268,6 +301,9 @@ function AppContent() {
     return () => {
       unsubscribe();
       ws.close();
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
     };
   }, []);
 

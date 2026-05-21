@@ -165,7 +165,19 @@ function OrderBook({ symbol, livePrice }: { symbol: string; livePrice?: number }
   const socketRef = React.useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
+  // Throttling for rapid real-time order book updates
+  const lastUpdateRef = React.useRef<{ bids: any[], asks: any[] } | null>(null);
+  const throttleTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
+    const commitOrderBook = () => {
+      if (lastUpdateRef.current) {
+        setData(lastUpdateRef.current);
+        setLoading(false);
+        lastUpdateRef.current = null;
+      }
+    };
+
     // Initial fetch to get the data immediately
     const fetchInitial = async () => {
       try {
@@ -204,8 +216,13 @@ function OrderBook({ symbol, livePrice }: { symbol: string; livePrice?: number }
         try {
           const message = JSON.parse(event.data);
           if (message.type === 'ORDERBOOK_UPDATE' && message.symbol === symbol) {
-            setData({ bids: message.bids, asks: message.asks });
-            setLoading(false);
+            lastUpdateRef.current = { bids: message.bids, asks: message.asks };
+            if (!throttleTimeoutRef.current) {
+              throttleTimeoutRef.current = setTimeout(() => {
+                commitOrderBook();
+                throttleTimeoutRef.current = null;
+              }, 400); // Flush updates to state every 400ms
+            }
           }
         } catch (e) {
           // Ignore parsing errors
@@ -228,6 +245,9 @@ function OrderBook({ symbol, livePrice }: { symbol: string; livePrice?: number }
     return () => {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (throttleTimeoutRef.current) {
+        clearTimeout(throttleTimeoutRef.current);
       }
       if (socketRef.current) {
         if (socketRef.current.readyState === WebSocket.OPEN) {

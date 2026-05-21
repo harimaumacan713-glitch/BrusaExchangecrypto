@@ -24,26 +24,26 @@ service cloud.firestore {
 
     // User-specific data
     match /wallets/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read, write: if isAuthenticated();
     }
     match /exchange_wallets/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read, write: if isAuthenticated();
       // Allow access to sub-collections
       match /{document=**} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isAuthenticated();
       }
     }
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read, write: if isAuthenticated();
     }
     match /transactions/{txId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read, write: if isAuthenticated();
     }
     match /external_transfers/{txId} {
-      allow read: if isAuthenticated() && resource.data.receiverUid == request.auth.uid;
+      allow read, write: if isAuthenticated();
     }
     match /transfer_masuk/{txId} {
-      allow read: if isAuthenticated() && resource.data.penerimaUid == request.auth.uid;
+      allow read, write: if isAuthenticated();
     }
     match /activity_logs/{logId} {
       allow create: if isAuthenticated();

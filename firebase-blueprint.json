@@ -14,12 +14,32 @@
         "lastUpdate": { "type": "string", "format": "date-time" }
       },
       "required": ["symbol", "price", "lastUpdate"]
+    },
+    "ErrorLog": {
+      "title": "Error Log",
+      "description": "Persistent log of client and server-side errors",
+      "type": "object",
+      "properties": {
+        "message": { "type": "string" },
+        "stack": { "type": "string" },
+        "source": { "type": "string" },
+        "url": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userId": { "type": "string" },
+        "context": { "type": "object" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["message", "source", "timestamp"]
     }
   },
   "firestore": {
     "/market_data/{symbol}": {
       "schema": "MarketData",
       "description": "Real-time updates for each symbol"
+    },
+    "/error_logs/{logId}": {
+      "schema": "ErrorLog",
+      "description": "System error logs collected server side"
     }
   }
 }

@@ -67,6 +67,34 @@ async function startServer() {
     next();
   });
 
+  // API route for server-side error logging
+  app.post("/api/logs/error", async (req, res) => {
+    try {
+      const { message, stack, source, url, userEmail, userId, context } = req.body;
+      
+      console.error(`[CLIENT_ERROR] Source: ${source || 'unknown'} | Message: ${message}`);
+      if (stack) {
+        console.error(`[CLIENT_STACK] ${stack}`);
+      }
+
+      await db.collection('error_logs').add({
+        message: message || "Unknown error",
+        stack: stack || null,
+        source: source || "client-ui",
+        url: url || null,
+        userEmail: userEmail || "Anonymous",
+        userId: userId || "Anonymous",
+        context: context || {},
+        timestamp: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      res.status(200).json({ success: true });
+    } catch (e: any) {
+      console.error("Failed to log error server-side:", e);
+      res.status(500).json({ error: "Failed to save error log" });
+    }
+  });
+
   // API route for receiving transfer from external banking app
   app.post(["/api/receive-transfer", "/api/terima-transfer"], async (req, res) => {
     try {

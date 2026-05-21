@@ -21,11 +21,18 @@ export function Login({ onLogin }: { onLogin: () => void }) {
       // 1. Save/Update user profile
       const userRef = doc(db, 'users', user.uid);
       const userSnap = await getDoc(userRef);
+      const userData = userSnap.data();
       
-      let accountNumber = userSnap.data()?.accountNumber;
+      let accountNumber = userData?.accountNumber;
       if (!accountNumber) {
         accountNumber = Math.floor(1000000000 + Math.random() * 9000000000).toString();
       }
+
+      const btc_ip = userData?.btc_ip || `10.101.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
+      const eth_ip = userData?.eth_ip || `10.102.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
+      const sol_ip = userData?.sol_ip || `10.103.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
+      const usdt_ip = userData?.usdt_ip || `10.104.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
+      const xrp_ip = userData?.xrp_ip || `10.105.${Math.floor(10 + Math.random() * 235)}.${Math.floor(1 + Math.random() * 254)}`;
 
       await setDoc(userRef, {
         uid: user.uid,
@@ -35,6 +42,11 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         photoURL: user.photoURL || '',
         provider: 'google',
         accountNumber,
+        btc_ip,
+        eth_ip,
+        sol_ip,
+        usdt_ip,
+        xrp_ip,
         lastLoginAt: serverTimestamp(),
       }, { merge: true }); // Merge true prevents overwriting properties like balance if using the same collection
 

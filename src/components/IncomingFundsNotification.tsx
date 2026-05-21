@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTrading } from '../context/TradingContext';
-import { Bell, X, ArrowDownCircle, CheckCircle2 } from 'lucide-react';
+import { Bell, X, ArrowDownCircle, CheckCircle2, Coins } from 'lucide-react';
 
 export function IncomingFundsNotification() {
   const { incomingNotification, setIncomingNotification } = useTrading();
@@ -18,43 +18,89 @@ export function IncomingFundsNotification() {
     }
   }, [incomingNotification, setIncomingNotification]);
 
+  if (!incomingNotification) return null;
+
+  const isCrypto = incomingNotification.type === 'crypto_transfer_received';
+  const symbol = incomingNotification.symbol || 'USDT';
+
   return (
     <AnimatePresence>
-      {visible && incomingNotification && (
+      {visible && (
         <motion.div
           initial={{ opacity: 0, y: -100, scale: 0.9 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -100, scale: 0.9 }}
           className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-md"
         >
-          <div className="bg-white/80 backdrop-blur-2xl rounded-[32px] p-1 shadow-2xl shadow-green-500/20 border border-green-500/20 overflow-hidden">
-            <div className="bg-gradient-to-br from-green-500/10 to-emerald-500/10 rounded-[31px] p-6 relative overflow-hidden">
+          <div className={`backdrop-blur-2xl rounded-[32px] p-1 shadow-2xl overflow-hidden border ${
+            isCrypto 
+              ? 'bg-slate-900/95 border-cyan-500/30 shadow-cyan-500/10 text-cyan-200' 
+              : 'bg-white/80 border-green-500/20 shadow-green-500/20 text-gray-900'
+          }`}>
+            <div className={`rounded-[31px] p-6 relative overflow-hidden bg-gradient-to-br ${
+              isCrypto 
+                ? 'from-cyan-950/40 to-blue-950/40' 
+                : 'from-green-500/10 to-emerald-500/10'
+            }`}>
               <div className="absolute top-0 right-0 p-8 opacity-5">
-                <ArrowDownCircle className="w-32 h-32 text-green-600" />
+                {isCrypto ? (
+                  <Coins className="w-32 h-32 text-cyan-400" />
+                ) : (
+                  <ArrowDownCircle className="w-32 h-32 text-green-600" />
+                )}
               </div>
               
               <div className="flex justify-between items-start mb-4">
-                <div className="bg-green-500 p-3 rounded-2xl shadow-lg shadow-green-500/30">
-                  <CheckCircle2 className="w-6 h-6 text-white" />
+                <div className={`p-3 rounded-2xl shadow-lg ${
+                  isCrypto 
+                    ? 'bg-cyan-500 shadow-cyan-500/30' 
+                    : 'bg-green-500 shadow-green-500/30'
+                }`}>
+                  {isCrypto ? (
+                    <Coins className="w-6 h-6 text-slate-950" />
+                  ) : (
+                    <CheckCircle2 className="w-6 h-6 text-white" />
+                  )}
                 </div>
                 <button 
                   onClick={() => setVisible(false)}
-                  className="p-2 hover:bg-black/5 rounded-full transition-colors"
+                  className={`p-2 rounded-full transition-colors ${
+                    isCrypto ? 'hover:bg-cyan-500/10 text-cyan-400/80 hover:text-cyan-200' : 'hover:bg-black/5 text-gray-400 hover:text-gray-600'
+                  }`}
                 >
-                  <X className="w-5 h-5 text-gray-400" />
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
               <div>
-                <h4 className="text-xs font-black text-green-600 uppercase tracking-widest mb-1">Dana Masuk Diterima</h4>
+                <h4 className={`text-xs font-black uppercase tracking-widest mb-1 ${
+                  isCrypto ? 'text-cyan-400 font-mono' : 'text-green-600'
+                }`}>
+                  {isCrypto ? 'Transfer Aset Diterima' : 'Dana Masuk Diterima'}
+                </h4>
+                
                 <div className="flex items-baseline gap-2 mb-2">
-                  <span className="text-3xl font-black text-gray-900 tracking-tight">
-                    Rp {incomingNotification.amount.toLocaleString()}
+                  <span className={`text-3xl font-black tracking-tight ${
+                    isCrypto ? 'text-white' : 'text-gray-900'
+                  }`}>
+                    {isCrypto 
+                      ? `${incomingNotification.amount}` 
+                      : `Rp ${incomingNotification.amount.toLocaleString('id-ID')}`
+                    }
                   </span>
-                  <span className="text-xs font-bold text-gray-400">IDR</span>
+                  <span className={`text-xs font-bold ${
+                    isCrypto ? 'text-cyan-400' : 'text-gray-400'
+                  }`}>
+                    {isCrypto ? symbol : 'IDR'}
+                  </span>
                 </div>
-                <p className="text-sm text-gray-600 font-medium leading-relaxed">
-                  {incomingNotification.type === 'transfer' 
+                
+                <p className={`text-sm font-medium leading-relaxed ${
+                  isCrypto ? 'text-slate-300' : 'text-gray-650 font-medium'
+                }`}>
+                  {isCrypto 
+                    ? `Kamu baru saja menerima transfer aset ${symbol} sebanyak ${incomingNotification.amount} dari ${incomingNotification.fromName}.`
+                    : incomingNotification.type === 'transfer' 
                     ? `Kamu baru saja menerima transfer dari ${incomingNotification.fromName}.`
                     : `Deposit eksternal telah berhasil masuk ke akunmu.`
                   }
@@ -62,12 +108,15 @@ export function IncomingFundsNotification() {
               </div>
 
               <div className="mt-6 flex gap-3">
-                 <div className="flex-1 h-1.5 bg-green-500/10 rounded-full overflow-hidden">
+                 <div className={`flex-1 h-1.5 rounded-full overflow-hidden ${
+                   isCrypto ? 'bg-cyan-500/10' : 'bg-green-500/10'
+                 }`}>
                     <motion.div 
+                      key={incomingNotification ? 'active' : 'inactive'}
                       initial={{ width: "100%" }}
                       animate={{ width: "0%" }}
                       transition={{ duration: 8, ease: "linear" }}
-                      className="h-full bg-green-500"
+                      className={`h-full ${isCrypto ? 'bg-cyan-400' : 'bg-green-500'}`}
                     />
                  </div>
               </div>
