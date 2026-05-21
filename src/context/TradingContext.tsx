@@ -17,8 +17,18 @@ interface Order {
   price: number;
   type: 'buy' | 'sell';
   timestamp: number;
-  status: 'filled';
+  status: 'filled' | 'pending' | 'cancelled';
   pnl?: number; // Realized PNL for sell, or 'saved' for buy
+}
+
+interface ExternalTransfer {
+    id: string;
+    senderAccountNumber: string;
+    receiverUid: string;
+    receiverAccountNumber: string;
+    jumlah: number;
+    status: string;
+    timestamp: any;
 }
 
 interface TradingContextType {
@@ -28,6 +38,7 @@ interface TradingContextType {
   accountNumber: string | null;
   positions: Position[];
   orders: Order[];
+  externalTransfers: ExternalTransfer[];
   incomingNotification: { amount: number, fromName: string, type: 'transfer' | 'deposit' } | null;
   setIncomingNotification: (val: any) => void;
   totalRealizedPnl: number;
@@ -39,6 +50,7 @@ interface TradingContextType {
   clearHistory: () => void;
   getTotalValue: (currentPrices: Record<string, number>) => number;
   getUnrealizedPnl: (currentPrices: Record<string, number>) => number;
+  usdtRate: number;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
@@ -50,6 +62,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [accountNumber, setAccountNumber] = useState<string | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [externalTransfers, setExternalTransfers] = useState<ExternalTransfer[]>([]);
   const [incomingNotification, setIncomingNotification] = useState<{ amount: number, fromName: string, type: 'transfer' | 'deposit' } | null>(null);
   const [usdtRate, setUsdtRate] = useState(16150);
 
@@ -60,7 +73,9 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .then(data => {
         if (data.IDR) setUsdtRate(data.IDR);
       })
-      .catch(() => {});
+      .catch((e) => {
+        console.warn('Failed to fetch usdt rate', e);
+      });
   }, []);
 
   const balanceUsdt = balance / usdtRate;
@@ -121,6 +136,20 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         where('receiverUid', '==', auth.currentUser.uid)
     );
     const unsubscribeExternal = onSnapshot(externalTxQ, (snapshot) => {
+        let transfers = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        } as ExternalTransfer));
+
+        // Sort: assuming timestamp is a Firestore Timestamp with toMillis()
+        transfers.sort((a, b) => {
+            const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : 0;
+            const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : 0;
+            return timeB - timeA;
+        });
+
+        setExternalTransfers(transfers);
+        
         snapshot.docChanges().forEach((change) => {
             if (change.type === "added") {
                 const data = change.doc.data();
@@ -403,24 +432,25 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const getUnrealizedPnl = useCallback((currentPrices: Record<string, number>) => {
-    const pnlUsdt = positions.reduce((acc, pos) => {
+    return positions.reduce((acc, pos) => {
       const currentPrice = currentPrices[pos.symbol];
       if (currentPrice === undefined || currentPrice === 0) return acc;
       return acc + (pos.amount * (currentPrice - pos.entryPrice));
     }, 0);
-    return pnlUsdt * usdtRate;
-  }, [positions, usdtRate]);
+  }, [positions]);
 
-  const getTotalValue = useCallback((currentPrices: Record<string, number>) => {
-    const portfolioValueUsdt = positions.reduce((acc, pos) => acc + (pos.amount * pos.entryPrice), 0);
-    const unrealizedPnlIdr = getUnrealizedPnl(currentPrices);
-    return balance + unrealizedPnlIdr + (portfolioValueUsdt * usdtRate);
-  }, [balance, positions, getUnrealizedPnl, usdtRate]);
+  const getTotalValue = useCallback((currentPricesUsdt: Record<string, number>) => {
+    const portfolioValueUsdt = positions.reduce((acc, pos) => {
+      const currentPrice = currentPricesUsdt[pos.symbol] || pos.entryPrice;
+      return acc + (pos.amount * currentPrice);
+    }, 0);
+    return (balance / usdtRate) + portfolioValueUsdt;
+  }, [balance, positions, usdtRate]);
 
   const totalRealizedPnl = orders.reduce((acc, order) => acc + (order.pnl || 0), 0);
 
   return (
-    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, accountNumber, positions, orders, incomingNotification, setIncomingNotification, totalRealizedPnl, buyAsset, sellAsset, withdraw, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl }}>
+    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, accountNumber, positions, orders, externalTransfers, incomingNotification, setIncomingNotification, totalRealizedPnl, buyAsset, sellAsset, withdraw, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl, usdtRate }}>
       {children}
     </TradingContext.Provider>
   );

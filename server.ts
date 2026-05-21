@@ -27,6 +27,18 @@ const ai = process.env.GEMINI_API_KEY ? new GoogleGenAI({
   }
 }) : null;
 
+// Helper to sync to Firestore
+async function syncToFirebase(symbol: string, data: any) {
+  try {
+    await db.collection('market_data').doc(symbol).set({
+      ...data,
+      lastUpdate: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch (e) {
+    console.warn(`Firebase sync failed for ${symbol}:`, e.message);
+  }
+}
+
 // Simple in-memory cache
 const signalCache = new Map<string, { data: any, timestamp: number }>();
 const CACHE_DURATION = 60 * 60 * 1000; // 60 minutes
@@ -43,7 +55,7 @@ async function startServer() {
   const wss = new WebSocketServer({ server });
   
   app.use(cors());
-  app.use(express.json({ type: '*/*' }));
+  app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   
   // Custom middleware to handle JSON parse errors gracefully
@@ -58,7 +70,6 @@ async function startServer() {
   // API route for receiving transfer from external banking app
   app.post(["/api/receive-transfer", "/api/terima-transfer"], async (req, res) => {
     try {
-      console.log("Headers:", req.headers);
       console.log("Received transfer request payload:", req.body);
       
       let body: any = req.body || {};
@@ -76,8 +87,10 @@ async function startServer() {
         return key ? obj[key] : undefined;
       };
 
-      const penerimaUid = findKey(body, 'penerimauid');
-      const jumlah = findKey(body, 'jumlah');
+      const receiverUid = findKey(body, 'receiveruid') || findKey(body, 'penerimauid');
+      const receiverAccountNumber = findKey(body, 'receiveraccountnumber') || findKey(body, 'nomorakunpenerima');
+      const senderAccountNumber = findKey(body, 'senderaccountnumber') || findKey(body, 'nomorakunpengirim') || "External";
+      const jumlah = findKey(body, 'jumlah') || findKey(body, 'amount');
       const secretKey = findKey(body, 'secretkey');
 
       const authHeader = req.headers.authorization || '';
@@ -87,68 +100,79 @@ async function startServer() {
       const expectedSecret = process.env.RAHASIA_TRANSFER_EKSTERNAL || "reivbyteio4b7b3r3vrriy7tov889";
 
       if (providedSecret !== expectedSecret) {
-        console.warn("External transfer failed due to invalid secret");
         return res.status(401).json({ error: "Unauthorized: Invalid secret key" });
       }
 
-      if (!penerimaUid || jumlah === undefined) {
-        return res.status(400).json({ error: "Kolom yang wajib diisi tidak tersedia", receivedBody: req.body });
+      if ((!receiverUid && !receiverAccountNumber) || jumlah === undefined) {
+        return res.status(400).json({ error: "Missing required fields (receiverUid or receiverAccountNumber and jumlah)" });
       }
 
       const numericJumlah = typeof jumlah === 'string' ? parseFloat(jumlah) : jumlah;
-
       if (typeof numericJumlah !== 'number' || isNaN(numericJumlah) || numericJumlah <= 0) {
-        console.warn("External transfer failed due to invalid params. Penerima:", penerimaUid, "Jumlah:", jumlah);
-        return res.status(400).json({ error: "Kolom yang wajib diisi tidak tersedia" });
+        return res.status(400).json({ error: "Invalid amount" });
+      }
+
+      // 1. Resolve receiver UID if only accountNumber provided
+      let finalUid = receiverUid;
+      if (!finalUid && receiverAccountNumber) {
+        const userQuery = await db.collection('users').where('accountNumber', '==', receiverAccountNumber).limit(1).get();
+        if (userQuery.empty) {
+          return res.status(404).json({ error: "Receiver account number not found" });
+        }
+        finalUid = userQuery.docs[0].id;
       }
 
       await db.runTransaction(async (transaction) => {
-        const userRef = db.collection('users').doc(penerimaUid);
-        const userSnap = await transaction.get(userRef);
+        const userRef = db.collection('users').doc(finalUid);
+        const exchangeWalletRef = db.collection('exchange_wallets').doc(finalUid);
         
+        const userSnap = await transaction.get(userRef);
         if (!userSnap.exists) {
-            console.warn("User not found:", penerimaUid);
             throw new Error('User not found');
         }
 
-        // Add balance to users profile model
-        transaction.update(userRef, { 
-            balance: admin.firestore.FieldValue.increment(numericJumlah) 
-        });
-
-        // Add balance to realtime wallet model
-        const walletRef = db.collection('wallets').doc(penerimaUid);
-        const walletSnap = await transaction.get(walletRef);
-        if (walletSnap.exists) {
-            transaction.update(walletRef, {
-                balance: admin.firestore.FieldValue.increment(numericJumlah),
+        const exchangeWalletSnap = await transaction.get(exchangeWalletRef);
+        if (!exchangeWalletSnap.exists) {
+            // Create if missing
+            transaction.set(exchangeWalletRef, {
+                idr: numericJumlah,
+                btc: 0,
+                eth: 0,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        } else {
+            transaction.update(exchangeWalletRef, { 
+                idr: admin.firestore.FieldValue.increment(numericJumlah),
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()
             });
         }
 
-        // Log transfer in 'transactions' collection as requested, and also 'transfer_masuk' for UI compatibility
-        const txRef = db.collection('transactions').doc();
-        transaction.set(txRef, {
-            penerimaUid,
+        // 2. Log in 'external_transfers' (New Requirement)
+        const extTxRef = db.collection('external_transfers').doc();
+        transaction.set(extTxRef, {
+            senderAccountNumber,
+            receiverUid: finalUid,
+            receiverAccountNumber: receiverAccountNumber || userSnap.data()?.accountNumber || "",
             jumlah: numericJumlah,
-            description: 'Transfer Masuk Eksternal',
-            type: 'deposit',
-            status: 'success',
+            status: 'SUCCESS',
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        const legacyLogRef = db.collection('transfer_masuk').doc();
-        transaction.set(legacyLogRef, {
-            penerimaUid,
-            senderUid: 'external',
+        // 3. Keep legacy logs for UI compatibility if needed
+        const txRef = db.collection('transactions').doc();
+        transaction.set(txRef, {
+            userId: finalUid,
             jumlah: numericJumlah,
-            status: 'success',
+            amount: numericJumlah,
+            description: `Deposit IDR from ${senderAccountNumber}`,
+            type: 'deposit',
+            status: 'filled',
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
       });
       
-      console.log("Transfer successful for user:", penerimaUid, "amount:", numericJumlah);
-      res.json({ success: true, sukses: true, message: "Transfer diterima" });
+      console.log("Transfer successful to:", finalUid, "amount:", numericJumlah);
+      res.json({ success: true, message: "Transfer processed successfully" });
     } catch (error: any) {
       console.error('Transfer Error:', error);
       res.status(500).json({ error: error.message });
@@ -178,10 +202,22 @@ async function startServer() {
       }
 
       const fetchTask = async (attempt = 0): Promise<any> => {
+          const idxStocks = ['BBCA', 'BBRI', 'TLKM', 'ASII', 'GOTO', 'BMRI'];
+          const usStocks = ['NVDA', 'AAPL', 'MSFT', 'TSLA', 'GOOGL'];
+          const stocks = [...idxStocks, ...usStocks];
+
           // Fetch some context: news and market data
           const [newsRes, marketData] = await Promise.all([
             fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&limit=5${process.env.CRYPTO_NEWS_API_KEY ? `&api_key=${process.env.CRYPTO_NEWS_API_KEY}` : ""}`).catch(() => ({ json: () => ({ Data: [] }) })),
             (async () => {
+              if (stocks.includes(symbol as string)) {
+                const stockPrices: Record<string, number> = {
+                  BBCA: 10450, BBRI: 4720, TLKM: 2840, ASII: 4420, GOTO: 62, BMRI: 6250,
+                  NVDA: 924.79, AAPL: 189.98, MSFT: 420.55, TSLA: 174.60, GOOGL: 171.95,
+                };
+                const price = stockPrices[symbol as string] || 1000;
+                return { PRICE: idxStocks.includes(symbol as string) ? price : price * 16150, VOLUME24HOUR: 1000000, MKTCAP: 1000000000 };
+              }
               try {
                 const apiKey = process.env.CRYPTO_NEWS_API_KEY;
                 const url = `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${symbol}&tsyms=IDR${apiKey ? `&api_key=${apiKey}` : ""}`;
@@ -312,6 +348,56 @@ async function startServer() {
     });
   }, 2000); // Update every 2 seconds
 
+  // Stock Polling Logic
+  const idxStocks = ['BBCA', 'BBRI', 'TLKM', 'ASII', 'GOTO', 'BMRI'];
+  const usStocks = ['NVDA', 'AAPL', 'MSFT', 'TSLA', 'GOOGL'];
+  const stockSymbols = [...idxStocks, ...usStocks];
+  const yahooSymbolsList = [
+    ...idxStocks.map(s => `${s}.JK`),
+    ...usStocks,
+    '^JKSE', // IHSG
+    '^GSPC', // S&P 500
+  ].join(',');
+
+  // Poll Yahoo every 5 seconds
+  setInterval(async () => {
+    try {
+      const yahooRes = await fetch(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${yahooSymbolsList}`, {
+         headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      const yahooData = await yahooRes.json();
+
+      if (yahooData.quoteResponse && yahooData.quoteResponse.result) {
+        yahooData.quoteResponse.result.forEach((quote: any) => {
+          const rawSymbol = quote.symbol === '^JKSE' ? 'IHSG' : quote.symbol === '^GSPC' ? 'SP500' : quote.symbol.replace('.JK', '');
+          const isIdx = quote.symbol.endsWith('.JK') || quote.symbol === '^JKSE';
+          const isUs = usStocks.includes(quote.symbol) || quote.symbol === '^GSPC';
+          
+          const update = {
+            symbol: rawSymbol,
+            price: quote.regularMarketPrice,
+            change: quote.regularMarketChangePercent,
+            mktcap: quote.marketCap || 0,
+            volume: quote.regularMarketVolume || 0,
+            isStock: true,
+            isIdx: isIdx,
+            isIndex: quote.symbol.startsWith('^')
+          };
+
+          broadcast({
+            type: "PRICE_UPDATE",
+            ...update
+          });
+
+          // Sync to Firebase
+          syncToFirebase(rawSymbol, update);
+        });
+      }
+    } catch (err) {
+      // Ignore polling errors quietly
+    }
+  }, 5000);
+
   // External CryptoCompare WebSocket logic
   const apiKey = process.env.CRYPTO_NEWS_API_KEY;
   let ccWs: WebSocket | null = null;
@@ -397,6 +483,7 @@ async function startServer() {
 
   // API route for news
   app.get("/api/news", async (req, res) => {
+    console.log('API /api/news called');
     try {
       const apiKey = process.env.CRYPTO_NEWS_API_KEY;
       if (!apiKey) {
@@ -405,13 +492,16 @@ async function startServer() {
         return;
       }
 
+      console.log('Fetching news from CryptoCompare...');
       const response = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&api_key=${apiKey}`);
       
+      console.log('CryptoCompare status:', response.status);
       if (!response.ok) {
         throw new Error(`Failed to fetch news: ${response.status}`);
       }
       
       const data = await response.json();
+      console.log('CryptoCompare response received');
       
       if (!data.Data) {
         throw new Error(`API Error: ${data.Message || 'No Data'}`);
@@ -448,18 +538,81 @@ async function startServer() {
       const response = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch prices: ${response.status}`);
+      let cryptoData: any = { RAW: {}, DISPLAY: {} };
+      if (response.ok) {
+        const data = await response.json();
+        if (data.RAW && data.DISPLAY) {
+          cryptoData = data;
+        }
       }
+
+      // Fetch Stock Data from Yahoo Finance
+      const idxStocks = ['BBCA', 'BBRI', 'TLKM', 'ASII', 'GOTO', 'BMRI'];
+      const usStocks = ['NVDA', 'AAPL', 'MSFT', 'TSLA', 'GOOGL'];
       
-      const data = await response.json();
-      
-      if (data.Response === 'Error' || !data.RAW) {
-        throw new Error(`API Error: ${data.Message || 'No RAW data'}`);
+      const yahooSymbols = [
+        ...idxStocks.map(s => `${s}.JK`),
+        ...usStocks,
+        '^JKSE',
+        '^GSPC'
+      ].join(',');
+
+      try {
+        const yahooRes = await fetch(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${yahooSymbols}`);
+        const yahooData = await yahooRes.json();
+
+        if (yahooData.quoteResponse && yahooData.quoteResponse.result) {
+          const usdtRate = cryptoData.RAW?.USDT?.IDR?.PRICE || 16150;
+          
+          yahooData.quoteResponse.result.forEach((quote: any) => {
+            const rawSymbol = quote.symbol === '^JKSE' ? 'IHSG' : quote.symbol === '^GSPC' ? 'SP500' : quote.symbol.replace('.JK', '');
+            const isIdx = quote.symbol.endsWith('.JK') || quote.symbol === '^JKSE';
+            const currentPrice = quote.regularMarketPrice;
+            const changePct = quote.regularMarketChangePercent;
+            const mktCap = quote.marketCap || 0;
+            const volume = quote.regularMarketVolume || 0;
+
+            const priceIdr = (isIdx || quote.symbol.startsWith('^')) ? currentPrice : currentPrice * usdtRate;
+            const priceUsdt = (isIdx || quote.symbol.startsWith('^')) ? currentPrice / usdtRate : currentPrice;
+
+            cryptoData.RAW[rawSymbol] = {
+              IDR: {
+                PRICE: priceIdr,
+                PRICE_USDT: priceUsdt,
+                CHANGEPCT24HOUR: changePct,
+                MKTCAP: mktCap,
+                VOLUME24HOUR: volume
+              }
+            };
+
+            const formatValue = (val: number) => {
+              if (val >= 1e12) return `${(val / 1e12).toFixed(2)}T`;
+              if (val >= 1e9) return `${(val / 1e9).toFixed(2)}B`;
+              if (val >= 1e6) return `${(val / 1e6).toFixed(2)}M`;
+              return val.toLocaleString();
+            };
+
+            cryptoData.DISPLAY[rawSymbol] = {
+              IDR: {
+                PRICE: isIdx ? `Rp ${priceIdr.toLocaleString('id-ID')}` : `$${currentPrice.toLocaleString('en-US')}`,
+                CHANGEPCT24HOUR: changePct.toFixed(2),
+                MKTCAP: formatValue(mktCap),
+                VOLUME24HOUR: formatValue(volume),
+                IMAGEURL: null
+              }
+            };
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch yahoo finance data:", err);
+      }
+
+      if (Object.keys(cryptoData.RAW).length === 0) {
+        throw new Error("No data fetched");
       }
 
       console.log('Prices fetched successfully');
-      res.json(data);
+      res.json(cryptoData);
     } catch (error) {
       console.error('Primary price fetch failed, trying public Binance fallback:', error);
       try {
@@ -551,6 +704,101 @@ function getMockNews() {
 
     try {
       const apiKey = process.env.CRYPTO_NEWS_API_KEY;
+      
+      // Stock lists (must match client lists)
+      const idxStocks = ['BBCA', 'BBRI', 'TLKM', 'ASII', 'GOTO', 'BMRI'];
+      const usStocks = ['NVDA', 'AAPL', 'MSFT', 'TSLA', 'GOOGL'];
+      const stocks = [...idxStocks, ...usStocks];
+
+      if (stocks.includes(symbol as string)) {
+        // Try fetching Yahoo finance chart first for history!
+        const isIdx = idxStocks.includes(symbol as string);
+        const ySymbol = isIdx ? `${symbol}.JK` : symbol;
+        
+        // Map range to Yahoo interval/range
+        let interval = '1h';
+        let yRange = '1d';
+        
+        if (range === '24h') { interval = '5m'; yRange = '1d'; }
+        else if (range === '7d') { interval = '1h'; yRange = '7d'; }
+        else if (range === '1m') { interval = '1d'; yRange = '1mo'; }
+        else if (range === '1y') { interval = '1wk'; yRange = '1y'; }
+        
+        try {
+          const yRes = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${ySymbol}?range=${yRange}&interval=${interval}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+          });
+          const yData = await yRes.json();
+          const result = yData.chart?.result?.[0];
+          
+          if (result && result.timestamp && result.indicators?.quote?.[0]?.close) {
+             const timestamps = result.timestamp;
+             const closes = result.indicators.quote[0].close;
+             
+             let history = [];
+             for(let i=0; i<timestamps.length; i++) {
+                if (closes[i] !== null) {
+                  const date = new Date(timestamps[i] * 1000);
+                  history.push({
+                    time: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    fullTime: date.toLocaleString(),
+                    price: closes[i],
+                    volume: result.indicators.quote[0].volume?.[i] || 0
+                  });
+                }
+             }
+
+             // Ensure the last point matches the ABSOLUTE LATEST "current price" from Yahoo
+             // This prevents the "last price vs chart" mismatch
+             try {
+               const quoteRes = await fetch(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ySymbol}`, {
+                 headers: { 'User-Agent': 'Mozilla/5.0' }
+               });
+               const quoteData = await quoteRes.json();
+               const quote = quoteData.quoteResponse?.result?.[0];
+               if (quote && quote.regularMarketPrice) {
+                 const now = new Date();
+                 const lastH = history[history.length - 1];
+                 // If the quote is newer or different from the last history point
+                 if (!lastH || Math.abs(lastH.price - quote.regularMarketPrice) > 0.0001) {
+                    history.push({
+                      time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                      fullTime: now.toLocaleString(),
+                      price: quote.regularMarketPrice,
+                      volume: quote.regularMarketVolume || 0
+                    });
+                 }
+               }
+             } catch (e) {
+               // Ignore quote fetch error
+             }
+
+             return res.json(history);
+          }
+        } catch(err) {
+           console.error("Failed to fetch yahoo chart:", err);
+        }
+
+        // Fallback generated history for stocks
+        const stockPrices: Record<string, number> = {
+          BBCA: 10450, BBRI: 4720, TLKM: 2840, ASII: 4420, GOTO: 62, BMRI: 6250,
+          NVDA: 924.79, AAPL: 189.98, MSFT: 420.55, TSLA: 174.60, GOOGL: 171.95,
+        };
+        const basePrice = stockPrices[symbol as string] || 1000;
+        const multiplier = idxStocks.includes(symbol as string) ? 1 : 1; // already handled by basePrice
+        
+        const count = range === '7d' ? 168 : range === '1m' ? 30 : range === '1y' ? 365 : 24;
+        const history = Array.from({ length: count }, (_, i) => {
+          const time = new Date(Date.now() - (count - i) * (count <= 24 ? 3600000 : 86400000));
+          return {
+            time: time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            fullTime: time.toLocaleString(),
+            price: basePrice * (1 + (Math.random() * 0.04 - 0.02))
+          };
+        });
+        return res.json(history);
+      }
+
       // Map range to CryptoCompare API params
       let limit = 24;
       let type = "histohour";
@@ -559,9 +807,9 @@ function getMockNews() {
       else if (range === "1m") { limit = 30; type = "histoday"; }
       else if (range === "1y") { limit = 365; type = "histoday"; }
 
-      const url = `https://min-api.cryptocompare.com/data/v2/${type}?fsym=${symbol}&tsym=IDR&limit=${limit}&api_key=${apiKey}`;
+      const url = `https://min-api.cryptocompare.com/data/v2/${type}?fsym=${symbol}&tsym=IDR&limit=${limit}${apiKey ? `&api_key=${apiKey}` : ""}`;
       
-      const response = await fetch(url);
+            const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
       const data = await response.json();
 
       if (data.Response === "Error") {
@@ -576,7 +824,7 @@ function getMockNews() {
 
       res.json(history);
     } catch (error) {
-      console.error("Error fetching history:", error);
+      console.error("Error fetching history for", symbol, ":", (error as Error).message);
       // Fallback mock history if API fails
       const mockHistory = Array.from({ length: 24 }, (_, i) => ({
         time: `${i}:00`,
@@ -593,11 +841,40 @@ function getMockNews() {
 
     try {
       const apiKey = process.env.CRYPTO_NEWS_API_KEY;
-      // Fetch current price to base the order book on
-      const priceUrl = `https://min-api.cryptocompare.com/data/price?fsym=${symbol}&tsyms=IDR${apiKey ? `&api_key=${apiKey}` : ""}`;
-      const priceRes = await fetch(priceUrl);
-      const priceData = await priceRes.json();
-      const currentPrice = priceData.IDR || 1000;
+
+      const idxStocks = ['BBCA', 'BBRI', 'TLKM', 'ASII', 'GOTO', 'BMRI'];
+      const usStocks = ['NVDA', 'AAPL', 'MSFT', 'TSLA', 'GOOGL'];
+      const stocks = [...idxStocks, ...usStocks];
+
+      let currentPrice = 1000;
+
+      if (stocks.includes(symbol as string)) {
+        const isIdx = idxStocks.includes(symbol as string);
+        const ySymbol = isIdx ? `${symbol}.JK` : symbol;
+        try {
+                      const yRes = await fetch(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${ySymbol}`, {
+             headers: { 'User-Agent': 'Mozilla/5.0' }
+           });
+           const yData = await yRes.json();
+           if (yData.quoteResponse && yData.quoteResponse.result && yData.quoteResponse.result[0]) {
+               currentPrice = yData.quoteResponse.result[0].regularMarketPrice;
+           } else {
+               throw new Error("No data");
+           }
+        } catch (e) {
+           const stockPrices: Record<string, number> = {
+             BBCA: 10450, BBRI: 4720, TLKM: 2840, ASII: 4420, GOTO: 62, BMRI: 6250,
+             NVDA: 924.79, AAPL: 189.98, MSFT: 420.55, TSLA: 174.60, GOOGL: 171.95,
+           };
+           currentPrice = stockPrices[symbol as string] || 1000;
+        }
+      } else {
+        // Fetch current price to base the order book on
+        const priceUrl = `https://min-api.cryptocompare.com/data/price?fsym=${symbol}&tsyms=IDR${apiKey ? `&api_key=${apiKey}` : ""}`;
+        const priceRes = await fetch(priceUrl);
+        const priceData = await priceRes.json();
+        currentPrice = priceData.IDR || 1000;
+      }
 
       // Generate a realistic order book around the current price
       const generateOrders = (basePrice: number, isAsk: boolean) => {
@@ -622,6 +899,74 @@ function getMockNews() {
     } catch (error) {
       console.error("Error fetching orderbook:", error);
       res.status(500).json({ error: "Failed to fetch order book" });
+    }
+  });
+
+// API route for stock proxy (Yahoo Finance)
+  app.get("/api/stocks/price", async (req, res) => {
+    const { symbol } = req.query;
+    
+    if (!symbol) {
+      return res.status(400).json({ error: "Symbol is required" });
+    }
+
+    // Try to get from Firestore cache first
+    let cachedData = null;
+    try {
+        const cachedDoc = await db.collection('market_data').doc(symbol as string).get();
+        if (cachedDoc.exists) {
+            cachedData = cachedDoc.data();
+            // If cache is less than 30 seconds old, return it immediately
+            if (cachedData && cachedData.lastUpdate && (Date.now() - cachedData.lastUpdate.toMillis() < 30000)) {
+                return res.json({ price: cachedData.price, source: 'cache' });
+            }
+        }
+    } catch(e) { /* ignore cache error */ }
+
+    try {
+        // Fetch from Yahoo (for Indo) or Finnhub (for US)
+        let price = null;
+        const isIndo = (symbol as string).endsWith('.JK');
+
+        if (isIndo) {
+            const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbol}`;
+            const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' } });
+            const data = await response.json();
+            if (data.quoteResponse && data.quoteResponse.result && data.quoteResponse.result.length > 0) {
+                price = data.quoteResponse.result[0].regularMarketPrice;
+            }
+        } else {
+            // Finnhub API for US
+            const finnhubKey = process.env.FINNHUB_API_KEY;
+            if (finnhubKey) {
+                const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${finnhubKey}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.c) {
+                    price = data.c;
+                }
+            } else {
+                console.warn("FINNHUB_API_KEY not configured");
+            }
+        }
+        
+        if (price) {
+            // Update Firebase
+            syncToFirebase(symbol as string, { price });
+            
+            return res.json({ price });
+        }
+        
+        throw new Error(`Data not found for ${symbol}`);
+    } catch (error) {
+        console.error(`Error fetching price for ${symbol}:`, error);
+      
+      // Serve stale cache if available
+      if (cachedData) {
+          return res.json({ price: cachedData.price, source: 'stale-cache' });
+      }
+      
+      res.status(500).json({ error: "Data market sementara tidak tersedia" });
     }
   });
 

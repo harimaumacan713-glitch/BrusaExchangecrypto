@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { onAuthStateChanged } from 'firebase/auth';
+import { collection, onSnapshot, query, where, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './lib/firebase';
 import { Login } from './components/Login';
 import { Hero } from './components/Hero';
@@ -22,11 +23,12 @@ import { WithdrawView } from './components/WithdrawView';
 import { AcademyView } from './components/AcademyView';
 import { RecurringView } from './components/RecurringView';
 import { ChatView } from './components/ChatView';
-import { Wallet, Zap, LineChart, Shield, Orbit, BarChart3, ChevronLeft, X } from 'lucide-react';
+import { AetherArena } from './components/AetherArena';
+import { Wallet, Zap, LineChart, Shield, Orbit, BarChart3, ChevronLeft, X, Swords } from 'lucide-react';
 import { SplashScreen } from './components/SplashScreen';
 import { IncomingFundsNotification } from './components/IncomingFundsNotification';
 
-type TabType = 'home' | 'assets' | 'trade' | 'market' | 'secure' | 'analytics' | 'withdraw' | 'academy' | 'recurring' | 'chat' | 'chatroom';
+type TabType = 'home' | 'assets' | 'trade' | 'market' | 'secure' | 'analytics' | 'withdraw' | 'academy' | 'recurring' | 'chat' | 'chatroom' | 'arena';
 
 const assetMeta = {
   BTC: { name: 'Bitcoin', amount: 0.005 },
@@ -103,11 +105,13 @@ export default function App() {
     });
   }, []);
 
-  if (loading) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+  if (loading) return <div className="flex items-center justify-center min-h-screen bg-slate-950 text-white font-sans">Loading...</div>;
 
   return (
     <TradingProvider>
-        {user ? <AppContent /> : <Login onLogin={() => setUser(auth.currentUser)} />}
+        <div className="min-h-screen bg-slate-950 font-sans text-slate-100 selection:bg-cyan-500/30">
+          {user ? <AppContent /> : <Login onLogin={() => setUser(auth.currentUser)} />}
+        </div>
     </TradingProvider>
   );
 }
@@ -125,134 +129,145 @@ function AppContent() {
   };
 
   useEffect(() => {
-    // 1. Initial Fetch for other metadata
-    const fetchInitialPrices = () => {
-      fetch('/api/prices')
-        .then(res => res.json())
-        .then(data => {
-          if (data.RAW) {
-            setPrices(data);
+    // 1. Initial State Fetch
+    fetch('/api/prices').then(res => {
+      if (!res.ok) throw new Error('Failed to fetch prices');
+      return res.json();
+    }).then(data => {
+      if (data && data.RAW) setPrices(data);
+      setLoading(false);
+    }).catch(err => {
+      console.error(err);
+      setLoading(false);
+    });
+
+    // 2. Real-time Firestore sync (for initial fallback or persisted data)
+    const unsubscribe = onSnapshot(collection(db, 'market_data'), (snapshot) => {
+      setPrices((prevPrices: any) => {
+        if (!prevPrices || !prevPrices.RAW) return prevPrices;
+        const newRaw = { ...prevPrices.RAW };
+        const newDisplay = prevPrices.DISPLAY ? { ...prevPrices.DISPLAY } : {};
+        const usdtRate = newRaw.USDT?.IDR?.PRICE || 16150;
+
+        snapshot.docChanges().forEach((change) => {
+          const data = change.doc.data();
+          const symbol = change.doc.id;
+          let idrPrice = data.price;
+          let priceUsdt = data.price;
+
+          if (data.isStock) {
+            const isIdx = data.isIdx || data.isIndex;
+            if (isIdx) priceUsdt = data.price / usdtRate;
+            else idrPrice = data.price * usdtRate;
+          } else {
+            idrPrice = data.price * usdtRate;
           }
-          setLoading(false);
-        })
-        .catch(err => {
-          console.error('Error fetching initial prices:', err);
-          setLoading(false);
-        });
-    };
 
-    fetchInitialPrices();
+          if (symbol === 'USDT') { idrPrice = data.price; priceUsdt = 1; }
 
-    // 2. Binance WebSocket for Top Assets
-    const binanceSymbols = ['btcusdt', 'ethusdt', 'solusdt', 'xrpusdt', 'adausdt', 'dotusdt', 'dogeusdt', 'maticusdt', 'avaxusdt'];
-    const binanceWs = new WebSocket(`wss://stream.binance.com:9443/ws/${binanceSymbols.join('@trade/') + '@trade'}`);
-
-    // We'll update the USDT/IDR rate dynamically
-    let usdtIdrRate = 16150; // New default closer to current market
-
-    // Fetch live rate periodically
-    const updateRate = () => {
-      fetch('https://min-api.cryptocompare.com/data/price?fsym=USDT&tsyms=IDR')
-        .then(res => res.json())
-        .then(data => {
-          if (data.IDR) usdtIdrRate = data.IDR;
-        })
-        .catch(() => {});
-    };
-    updateRate();
-    const rateInterval = setInterval(updateRate, 60000); // Every minute
-
-    binanceWs.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.e === 'trade' || data.stream?.includes('trade')) {
-          const trade = data.data || data;
-          const symbol = trade.s.replace('USDT', '');
-          const price = parseFloat(trade.p);
-
-          setPrices((prevPrices: any) => {
-            if (!prevPrices || !prevPrices.RAW) return prevPrices;
-
-            const idrPrice = price * usdtIdrRate;
-            
-            // Create a deep-ish clone to avoid mutation
-            const newRaw = { ...prevPrices.RAW };
-            const newDisplay = prevPrices.DISPLAY ? { ...prevPrices.DISPLAY } : {};
-
-            if (newRaw[symbol]) {
-              // Update RAW symbol
-              newRaw[symbol] = {
-                ...newRaw[symbol],
-                IDR: {
-                  ...newRaw[symbol].IDR,
-                  PRICE: idrPrice,
-                  PRICE_USDT: price,
-                }
-              };
-
-              // Update DISPLAY symbol if it exists
-              if (newDisplay[symbol]) {
-                newDisplay[symbol] = {
-                  ...newDisplay[symbol],
-                  IDR: {
-                    ...newDisplay[symbol].IDR,
-                    PRICE: new Intl.NumberFormat('id-ID', {
-                      style: 'currency',
-                      currency: 'IDR',
-                      maximumFractionDigits: 0
-                    }).format(idrPrice)
-                  }
-                };
-              }
-            } else {
-               // Initialize if missing
-               newRaw[symbol] = {
-                 IDR: { PRICE: idrPrice, PRICE_USDT: price, CHANGEPCT24HOUR: 0, MKTCAP: 0, VOLUME24HOUR: 0 }
-               };
-               newDisplay[symbol] = {
-                 IDR: { PRICE: `Rp ${idrPrice.toLocaleString()}`, CHANGEPCT24HOUR: "0", MKTCAP: "0", VOLUME24HOUR: "0" }
-               };
+          newRaw[symbol] = {
+            ...newRaw[symbol],
+            IDR: {
+              ...(newRaw[symbol]?.IDR || {}),
+              PRICE: idrPrice,
+              PRICE_USDT: priceUsdt,
+              CHANGEPCT24HOUR: data.change,
+              MKTCAP: data.mktcap,
+              VOLUME24HOUR: data.volume
             }
+          };
 
-            return { 
-              ...prevPrices,
-              RAW: newRaw,
-              DISPLAY: newDisplay
-            };
-          });
-        }
-      } catch (e) {
-        console.error('Binance WS error:', e);
-      }
-    };
+          const isUsStock = data.isStock && !data.isIdx && !data.isIndex;
+          const formattedPrice = isUsStock
+            ? `$${data.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
+            : `Rp ${idrPrice.toLocaleString('id-ID')}`;
 
-    // 3. Local WebSocket (for simulation or other app features if needed)
+          newDisplay[symbol] = {
+            ...newDisplay[symbol],
+            IDR: {
+              ...(newDisplay[symbol]?.IDR || {}),
+              PRICE: formattedPrice,
+              CHANGEPCT24HOUR: data.change ? data.change.toFixed(2) : "0.00"
+            }
+          };
+        });
+
+        return { ...prevPrices, RAW: newRaw, DISPLAY: newDisplay };
+      });
+    });
+
+    // 3. Ultra Real-Time WebSocket sync from our server
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
-    const ws = new WebSocket(wsUrl);
+    const host = window.location.host;
+    const ws = new WebSocket(`${protocol}//${host}`);
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'PRICE_UPDATE') {
-          const { symbol } = data;
-          const trackedByBinance = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOT', 'DOGE', 'MATIC', 'AVAX'];
-          if (trackedByBinance.includes(symbol)) return; // Prefer Binance Real-time
-
+        const message = JSON.parse(event.data);
+        if (message.type === 'PRICE_UPDATE') {
           setPrices((prevPrices: any) => {
             if (!prevPrices || !prevPrices.RAW) return prevPrices;
-            const newPrices = { ...prevPrices };
-            // ... logic for other symbols
-            return newPrices;
+            const newRaw = { ...prevPrices.RAW };
+            const newDisplay = prevPrices.DISPLAY ? { ...prevPrices.DISPLAY } : {};
+            
+            const symbol = message.symbol;
+            const usdtRate = newRaw.USDT?.IDR?.PRICE || 16150;
+            const data = message;
+            
+            let idrPrice = data.price;
+            let priceUsdt = data.price;
+
+            // Handle logic exactly like Firestore sync
+            if (data.isStock) {
+              if (data.isIdx) {
+                priceUsdt = data.price / usdtRate;
+              } else {
+                idrPrice = data.price * usdtRate;
+              }
+            } else {
+              // Crypto - WSS data.price is ALREADY in IDR
+              idrPrice = data.price;
+              priceUsdt = data.price / usdtRate;
+            }
+            if (symbol === 'USDT') { idrPrice = data.price; priceUsdt = 1; }
+
+            newRaw[symbol] = {
+              ...newRaw[symbol],
+              IDR: {
+                ...(newRaw[symbol]?.IDR || {}),
+                PRICE: idrPrice,
+                PRICE_USDT: priceUsdt,
+                CHANGEPCT24HOUR: data.change || (newRaw[symbol]?.IDR?.CHANGEPCT24HOUR),
+                MKTCAP: data.mktcap || (newRaw[symbol]?.IDR?.MKTCAP),
+                VOLUME24HOUR: data.volume || (newRaw[symbol]?.IDR?.VOLUME24HOUR)
+              }
+            };
+
+            const isUsStock = data.isStock && !data.isIdx && !data.isIndex;
+            const formattedPrice = isUsStock
+              ? `$${data.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
+              : `Rp ${idrPrice.toLocaleString('id-ID')}`;
+
+            newDisplay[symbol] = {
+              ...newDisplay[symbol],
+              IDR: {
+                ...(newDisplay[symbol]?.IDR || {}),
+                PRICE: formattedPrice,
+                CHANGEPCT24HOUR: data.change ? parseFloat(data.change).toFixed(2) : (newDisplay[symbol]?.IDR?.CHANGEPCT24HOUR)
+              }
+            };
+
+            return { ...prevPrices, RAW: newRaw, DISPLAY: newDisplay };
           });
         }
-      } catch (e) {}
+      } catch(e) {
+        // ignore
+      }
     };
 
     return () => {
-      binanceWs.close();
+      unsubscribe();
       ws.close();
-      clearInterval(rateInterval);
     };
   }, []);
 
@@ -262,11 +277,44 @@ function AppContent() {
         return (
           <div key="home" className="relative">
             <Hero prices={prices} onTabChange={setActiveTab} />
-            <div className="px-6 -mt-16 relative z-10">
-              <div className="bg-white rounded-3xl p-6 shadow-xl mb-6">
-                <Portfolio prices={prices} loading={loading} />
+            <div className="px-4 sm:px-6 -mt-16 relative z-10 space-y-6">
+              {/* Premium Dashboard Portfolio Allocations & Growth Trends */}
+              <Portfolio prices={prices} loading={loading} isDashboard={true} />
+              
+              {/* Split layout for Live Market and Quick Feed Actions */}
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+                <div className="xl:col-span-8">
+                  <LiveMarket prices={prices} loading={loading} />
+                </div>
+                <div className="xl:col-span-4 bg-slate-900 border border-slate-800 p-6 rounded-[32px] shadow-xl relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/5 blur-2xl rounded-full" />
+                  <div className="relative z-10">
+                    <span className="text-[10px] font-mono font-black text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-md uppercase tracking-widest inline-block mb-3">
+                      🚀 SWAP & STRIKE FEED
+                    </span>
+                    <h4 className="text-white font-extrabold text-base mb-1">Aether Trading Terminal</h4>
+                    <p className="text-slate-400 text-xs font-semibold leading-relaxed mb-6">
+                      Execute low-slippage lightning trades with automated liquidity, and challenge neural agent bot models in the high stakes AI Duel Arena!
+                    </p>
+                    <div className="space-y-3">
+                      <button 
+                        onClick={() => setActiveTab('trade')}
+                        className="w-full py-3.5 bg-gradient-to-br from-cyan-400 to-indigo-600 text-slate-950 font-black text-xs uppercase tracking-widest rounded-2xl transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-cyan-500/10 flex items-center justify-center gap-2"
+                      >
+                        <Zap className="w-4 h-4 fill-current text-slate-950" /> Instant Trade Hub
+                      </button>
+                      <button 
+                        onClick={() => setActiveTab('arena')}
+                        className="w-full py-3.5 bg-slate-800 hover:bg-slate-750 text-white font-black text-xs uppercase tracking-widest rounded-2xl border border-slate-750 hover:border-cyan-500/30 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Swords className="w-4 h-4 text-cyan-400" /> Enter AI Arena
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <LiveMarket prices={prices} loading={loading} />
+
+              {/* Real-time Ticker and News Analysis Stream */}
               <Features />
             </div>
             <Footer />
@@ -337,6 +385,18 @@ function AppContent() {
             <AnalyticsView prices={prices} />
           </motion.div>
         );
+      case 'arena':
+        return (
+          <motion.div
+            key="arena"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.2 }}
+          >
+            <AetherArena prices={prices} loading={loading} />
+          </motion.div>
+        );
       case 'academy':
       case 'recurring':
       case 'chat':
@@ -374,8 +434,8 @@ function AppContent() {
   };
 
   return (
-    <div className="bg-[#F8FAFC] min-h-screen font-sans flex flex-col items-center">
-      <div className="w-full max-w-md bg-white min-h-screen relative shadow-2xl shadow-blue-900/10 overflow-x-hidden">
+    <div className="bg-slate-950 min-h-screen font-sans text-gray-100">
+      <div className="w-full min-h-screen relative overflow-x-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
         <AnimatePresence>
           {isInitializing ? (
             <SplashScreen onComplete={() => setIsInitializing(false)} />
@@ -386,17 +446,67 @@ function AppContent() {
               animate={{ opacity: 1 }}
               className="flex flex-col min-h-screen"
             >
-              <div className="flex-1 pb-28">
-                <IncomingFundsNotification />
-                <AnimatePresence mode="wait">
-                  {renderContent()}
-                </AnimatePresence>
+              <div className="flex flex-col lg:flex-row min-h-screen">
+                {/* Desktop Sidebar */}
+                <div className="hidden lg:flex flex-col w-64 bg-slate-900 border-r border-white/10 p-6 sticky top-0 h-screen">
+                  <div className="flex items-center gap-3 mb-10 px-2">
+                    <div className="w-8 h-8 bg-cyan-500 rounded-xl flex items-center justify-center">
+                      <Orbit className="w-5 h-5 text-slate-950" />
+                    </div>
+                    <span className="font-black tracking-tighter text-lg text-white">AETHEREX</span>
+                  </div>
+                  
+                  <nav className="flex-1 space-y-2">
+                    {[
+                      { id: 'home', icon: Orbit, label: 'Dashboard' },
+                      { id: 'assets', icon: Wallet, label: 'Portfolio' },
+                      { id: 'trade', icon: Zap, label: 'Trade' },
+                      { id: 'market', icon: LineChart, label: 'Markets' },
+                      { id: 'arena', icon: Swords, label: 'AI Duel Arena' },
+                      { id: 'secure', icon: Shield, label: 'Security' },
+                    ].map(item => (
+                      <button
+                        key={item.id}
+                        onClick={() => setActiveTab(item.id as TabType)}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-bold text-sm ${
+                          activeTab === item.id 
+                            ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20' 
+                            : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                        }`}
+                      >
+                        <item.icon className="w-5 h-5" />
+                        {item.label}
+                      </button>
+                    ))}
+                  </nav>
+
+                  <div className="pt-6 border-t border-slate-800">
+                    <div className="bg-slate-800 rounded-2xl p-4 border border-slate-700">
+                      <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Support 24/7</p>
+                      <button 
+                        onClick={() => setActiveTab('chat')}
+                        className="w-full bg-slate-900 border border-slate-700 py-2 rounded-xl text-xs font-bold text-slate-200 hover:border-cyan-500 hover:text-cyan-400 transition-colors"
+                      >
+                        Contact Support
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 pb-28 lg:pb-0 overflow-y-auto">
+                  <div className="max-w-7xl mx-auto w-full">
+                    <IncomingFundsNotification />
+                    <AnimatePresence mode="wait">
+                      {renderContent()}
+                    </AnimatePresence>
+                  </div>
+                </div>
               </div>
 
-              {/* Bottom Navigation Locked to Container */}
-              <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
-                <div className="max-w-md mx-auto pointer-events-auto px-1 pb-1">
-                  <div className="bg-white/90 backdrop-blur-xl border border-gray-100/50 flex justify-around items-center p-3 rounded-t-[32px] md:rounded-[32px] md:mb-4 shadow-[0_-10px_40px_rgba(0,0,0,0.06)]">
+              {/* Bottom Navigation Locked to Container (Mobile Only) */}
+              <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none lg:hidden">
+                <div className="max-w-sm md:max-w-md mx-auto pointer-events-auto px-1 pb-1">
+                  <div className="bg-slate-900 border border-white/10 flex justify-around items-center p-3 rounded-t-[32px] md:rounded-[32px] md:mb-4 shadow-[0_-10px_40px_rgba(0,0,0,0.3)]">
                     
                     {/* Nav Item: Home */}
                     <button 
@@ -406,14 +516,14 @@ function AppContent() {
                       <div
                         className={`p-2.5 rounded-2xl transition-all duration-300 ${
                           activeTab === 'home' 
-                            ? 'bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/30 text-white translate-y-[-4px]' 
-                            : 'bg-transparent text-gray-400 hover:text-cyan-500'
+                            ? 'bg-gradient-to-br from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/30 text-white' 
+                            : 'bg-transparent text-slate-400 hover:text-cyan-500'
                         }`}
                       >
                         <Orbit className="w-6 h-6" />
                       </div>
                       <span className={`text-[9px] font-black uppercase tracking-wider transition-all duration-300 ${
-                        activeTab === 'home' ? 'text-cyan-600 opacity-100' : 'text-gray-400 opacity-60'
+                        activeTab === 'home' ? 'text-cyan-400 opacity-100' : 'text-slate-500 opacity-60'
                       }`}>Home</span>
                     </button>
 
@@ -422,10 +532,10 @@ function AppContent() {
                       onClick={() => setActiveTab('assets')}
                       className="flex flex-col items-center gap-1 outline-none"
                     >
-                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'assets' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'assets' ? 'text-cyan-400' : 'text-slate-400 hover:text-cyan-500'}`}>
                         <Wallet className="w-5 h-5" />
                       </div>
-                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'assets' ? 'text-cyan-600' : 'text-gray-400'}`}>Assets</span>
+                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'assets' ? 'text-cyan-400' : 'text-slate-500'}`}>Assets</span>
                     </button>
 
                     {/* Nav Item: Trade */}
@@ -433,10 +543,10 @@ function AppContent() {
                       onClick={() => setActiveTab('trade')}
                       className="flex flex-col items-center gap-1 outline-none"
                     >
-                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'trade' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'trade' ? 'text-cyan-400' : 'text-slate-400 hover:text-cyan-500'}`}>
                         <Zap className="w-5 h-5" />
                       </div>
-                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'trade' ? 'text-cyan-600' : 'text-gray-400'}`}>Trade</span>
+                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'trade' ? 'text-cyan-400' : 'text-slate-500'}`}>Trade</span>
                     </button>
 
                     {/* Nav Item: Market */}
@@ -444,21 +554,10 @@ function AppContent() {
                       onClick={() => setActiveTab('market')}
                       className="flex flex-col items-center gap-1 outline-none"
                     >
-                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'market' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'market' ? 'text-cyan-400' : 'text-slate-400 hover:text-cyan-500'}`}>
                         <LineChart className="w-5 h-5" />
                       </div>
-                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'market' ? 'text-cyan-600' : 'text-gray-400'}`}>Market</span>
-                    </button>
-
-                    {/* Nav Item: Analytics */}
-                    <button 
-                      onClick={() => setActiveTab('analytics')}
-                      className="flex flex-col items-center gap-1 outline-none"
-                    >
-                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'analytics' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
-                        <BarChart3 className="w-5 h-5" />
-                      </div>
-                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'analytics' ? 'text-cyan-600' : 'text-gray-400'}`}>Stats</span>
+                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'market' ? 'text-cyan-400' : 'text-slate-500'}`}>Market</span>
                     </button>
 
                     {/* Nav Item: Secure */}
@@ -466,10 +565,10 @@ function AppContent() {
                       onClick={() => setActiveTab('secure')}
                       className="flex flex-col items-center gap-1 outline-none"
                     >
-                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'secure' ? 'text-cyan-600 scale-110' : 'text-gray-400 hover:text-cyan-500'}`}>
+                      <div className={`p-2 rounded-xl transition-all duration-300 ${activeTab === 'secure' ? 'text-cyan-400' : 'text-slate-400 hover:text-cyan-500'}`}>
                         <Shield className="w-5 h-5" />
                       </div>
-                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'secure' ? 'text-cyan-600' : 'text-gray-400'}`}>Secure</span>
+                      <span className={`text-[9px] font-bold transition-all duration-300 ${activeTab === 'secure' ? 'text-cyan-400' : 'text-slate-500'}`}>Secure</span>
                     </button>
                   </div>
                 </div>

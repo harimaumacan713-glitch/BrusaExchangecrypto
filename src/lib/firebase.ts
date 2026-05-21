@@ -1,8 +1,8 @@
-import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getDatabase } from "firebase/database";
-import { getMessaging } from "firebase/messaging";
+import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+import { getDatabase } from 'firebase/database';
+import { getMessaging } from 'firebase/messaging';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDR91D_1_ijJztpUD2qy-ovqvDsGZ83Zjg",
@@ -16,7 +16,7 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const rtdb = getDatabase(app);
-export const messaging = getMessaging(app);
+export const auth = getAuth(app);
+export const rtdb = getDatabase(app, firebaseConfig.databaseURL);
+export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;

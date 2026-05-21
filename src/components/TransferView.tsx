@@ -79,34 +79,41 @@ export function TransferView() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-8 space-y-6 bg-slate-950 flex-1 flex flex-col items-center">
+      <div className="w-full max-w-lg space-y-6">
+        <div className="flex flex-col gap-2 mb-8">
+          <h2 className="text-3xl font-black tracking-tighter text-white">Transfer</h2>
+          <p className="text-slate-400 text-sm font-bold uppercase tracking-widest text-[10px]">Send funds instantly to another account.</p>
+        </div>
+
         <div className="relative">
-            <User className="absolute left-4 top-4 text-gray-400" />
+            <User className="absolute left-6 top-6 text-slate-500 w-6 h-6" />
             <input 
                 type="text"
                 value={recipientUid}
                 onChange={(e) => setRecipientUid(e.target.value)}
-                placeholder="Recipient Account Number or UID"
-                className="w-full p-4 pl-12 rounded-[28px] border border-gray-100 bg-gray-50 outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Recipient Account Number"
+                className="w-full bg-slate-900 border-2 border-slate-800 rounded-[32px] pl-16 pr-6 py-6 text-lg font-black text-white focus:border-indigo-500 focus:bg-slate-800 outline-none transition-all placeholder:text-slate-600 shadow-inner"
             />
         </div>
         <div className="relative">
-            <DollarSign className="absolute left-4 top-4 text-gray-400" />
+            <DollarSign className="absolute left-6 top-6 text-slate-500 w-6 h-6" />
             <input 
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="Amount"
-                className="w-full p-4 pl-12 rounded-[28px] border border-gray-100 bg-gray-50 outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Transfer Amount"
+                className="w-full bg-slate-900 border-2 border-slate-800 rounded-[32px] pl-16 pr-6 py-6 text-xl font-black text-white focus:border-indigo-500 focus:bg-slate-800 outline-none transition-all placeholder:text-slate-600 shadow-inner"
             />
         </div>
         <button 
             onClick={handleTransfer}
             disabled={loading || !amount || !recipientUid}
-            className="w-full p-5 bg-indigo-600 text-white rounded-[28px] font-black hover:bg-indigo-700 disabled:opacity-50 transition-all"
+            className="w-full mt-8 py-5 bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-black uppercase tracking-widest text-lg rounded-[32px] shadow-xl shadow-indigo-500/20 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:hover:scale-100 transition-all border border-transparent"
         >
-            {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Confirm Transfer'}
+            {loading ? <Loader2 className="animate-spin mx-auto w-6 h-6" /> : 'Confirm Transfer'}
         </button>
+      </div>
     </div>
   );
 }
