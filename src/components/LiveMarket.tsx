@@ -15,6 +15,7 @@ import {
 import { StockPriceSkeleton } from './StockPriceSkeleton';
 
 import { ASSET_METADATA } from '../constants';
+import { useTrading } from '../context/TradingContext';
 import { createChart, ColorType, IChartApi, ISeriesApi, LineSeries, CrosshairMode } from 'lightweight-charts';
 
 function AnalysisChart({ 
@@ -554,7 +555,8 @@ function OrderBook({ symbol, livePrice }: { symbol: string; livePrice?: number }
   );
 }
 
-export function LiveMarket({ prices, loading }: { prices: any; loading: boolean }) {
+export function LiveMarket({ prices, loading, isDashboard = false }: { prices: any; loading: boolean; isDashboard?: boolean }) {
+  const { positions } = useTrading();
   const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('Trending');
   const [selectedRange, setSelectedRange] = useState('24h');
@@ -675,25 +677,65 @@ export function LiveMarket({ prices, loading }: { prices: any; loading: boolean 
     }).filter(Boolean);
   }, [prices, activeCategory, stockData]);
 
-  const marketData = activeTab === 'Watchlist' 
-    ? allMarketData.filter(item => watchlist.includes(item.symbol))
-    : allMarketData;
+  const marketData = useMemo(() => {
+    const rawList = activeTab === 'Watchlist' 
+      ? allMarketData.filter(item => item && watchlist.includes(item.symbol))
+      : allMarketData;
 
-  const allSymbols = allMarketData.map(d => d.symbol);
+    if (!isDashboard) return rawList.filter(Boolean);
+
+    // Filter to cryptocurrency assets
+    const cryptoAssets = allMarketData.filter(item => item !== null) as any[];
+
+    // User's owned symbols from positions
+    const ownedSymbolsList = positions ? positions.filter(p => p.amount > 0).map(p => p.symbol.toUpperCase()) : [];
+    const ownedSymbolsSet = new Set(ownedSymbolsList);
+
+    // Assets owned by the user
+    const ownedAssets = cryptoAssets.filter(item => ownedSymbolsSet.has(item.symbol.toUpperCase()));
+
+    // Non-owned assets to find the best performing ones
+    const nonOwnedAssets = cryptoAssets.filter(item => !ownedSymbolsSet.has(item.symbol.toUpperCase()));
+    
+    // Sort non-owned assets by change% descending to find the "best performing currently" (aset terbaik saat ini)
+    const bestAssets = [...nonOwnedAssets]
+      .sort((a, b) => {
+        const changeA = parseFloat(a.change) || 0;
+        const changeB = parseFloat(b.change) || 0;
+        return changeB - changeA;
+      })
+      .slice(0, 3); // Pick top 3 best performing assets
+
+    // Combine them while avoiding duplicates
+    const combined = [...ownedAssets, ...bestAssets];
+    
+    // Remove duplicates
+    const uniqueCombined = combined.filter((item, index, self) =>
+      self.findIndex(t => t.symbol === item.symbol) === index
+    );
+
+    return uniqueCombined;
+  }, [allMarketData, watchlist, activeTab, isDashboard, positions]);
+
+  const allSymbols = allMarketData.filter(Boolean).map(d => d.symbol);
 
   return (
     <section className="pb-10 pt-2 px-2">
       <div className="flex justify-between items-center mb-6">
           <div className="flex flex-col">
-            <h2 className="text-2xl font-black tracking-tighter text-white font-sans">Market Assets</h2>
+            <h2 className="text-2xl font-black tracking-tighter text-white font-sans">
+              {isDashboard ? "Dashboard Assets Tracker" : "Market Assets"}
+            </h2>
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
-              {activeCategory === 'Crypto' ? 'Real-time data from Binance Global' : activeCategory === 'IDX' ? 'Indonesia Stock Exchange' : 'Global US Markets'}
+              {isDashboard 
+                ? "Your active holdings & top performing assets today" 
+                : (activeCategory === 'Crypto' ? 'Real-time data from Binance Global' : activeCategory === 'IDX' ? 'Indonesia Stock Exchange' : 'Global US Markets')}
             </p>
           </div>
           <div className="flex items-center gap-2 px-4 py-1.5 bg-slate-900 rounded-full border border-slate-800 shadow-lg shadow-black/20">
              <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
              <span className="text-[10px] font-black text-cyan-400 uppercase tracking-widest bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">
-               {activeCategory === 'Crypto' ? 'LIVE • BINANCE' : activeCategory === 'IDX' ? 'LIVE • IDX' : 'LIVE • NASDAQ'}
+               {isDashboard ? 'DASHBOARD' : (activeCategory === 'Crypto' ? 'LIVE • BINANCE' : activeCategory === 'IDX' ? 'LIVE • IDX' : 'LIVE • NASDAQ')}
              </span>
           </div>
       </div>
@@ -743,25 +785,27 @@ export function LiveMarket({ prices, loading }: { prices: any; loading: boolean 
           </div>
       </div>
 
-      <div className="flex gap-2 mb-8 overflow-x-auto pb-2 scrollbar-none px-2">
-        {tabs.map(tab => (
-            <button 
-              key={tab} 
-              onClick={() => {
-                setActiveTab(tab);
-                if (tab === 'Crypto') setActiveCategory('Crypto');
-                if (tab === 'Indonesian Stocks') setActiveCategory('IDX');
-                if (tab === 'US Stocks') setActiveCategory('US');
-              }}
-              className={`px-6 py-3 rounded-[20px] text-xs font-black uppercase tracking-widest whitespace-nowrap transition-all ${tab === activeTab ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20' : 'bg-slate-800 border-transparent text-slate-400 hover:text-white border hover:border-slate-700'}`}
-            >
-                {tab}
-                {tab === 'Watchlist' && watchlist.length > 0 && (
-                  <span className={`ml-2 px-2 py-0.5 rounded-md text-[10px] ${tab === activeTab ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-900 text-cyan-400'}`}>{watchlist.length}</span>
-                )}
-            </button>
-        ))}
-      </div>
+      {!isDashboard && (
+        <div className="flex gap-2 mb-8 overflow-x-auto pb-2 scrollbar-none px-2">
+          {tabs.map(tab => (
+              <button 
+                key={tab} 
+                onClick={() => {
+                  setActiveTab(tab);
+                  if (tab === 'Crypto') setActiveCategory('Crypto');
+                  if (tab === 'Indonesian Stocks') setActiveCategory('IDX');
+                  if (tab === 'US Stocks') setActiveCategory('US');
+                }}
+                className={`px-6 py-3 rounded-[20px] text-xs font-black uppercase tracking-widest whitespace-nowrap transition-all ${tab === activeTab ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20' : 'bg-slate-800 border-transparent text-slate-400 hover:text-white border hover:border-slate-700'}`}
+              >
+                  {tab}
+                  {tab === 'Watchlist' && watchlist.length > 0 && (
+                    <span className={`ml-2 px-2 py-0.5 rounded-md text-[10px] ${tab === activeTab ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-900 text-cyan-400'}`}>{watchlist.length}</span>
+                  )}
+              </button>
+          ))}
+        </div>
+      )}
 
       <div className="bg-slate-900 rounded-[32px] p-2 shadow-2xl border border-slate-800 min-h-[300px] grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-2 lg:gap-0">
         {!prices && activeCategory !== 'Crypto' ? (
@@ -794,7 +838,19 @@ export function LiveMarket({ prices, loading }: { prices: any; loading: boolean 
                               )}
                             </div>
                             <div>
-                                <div className="font-bold text-white text-base leading-tight">{item.symbol}</div>
+                                <div className="flex items-center gap-2">
+                                  <div className="font-bold text-white text-base leading-tight">{item.symbol}</div>
+                                  {isDashboard && positions && positions.some(p => p.symbol.toUpperCase() === item.symbol.toUpperCase() && p.amount > 0) && (
+                                    <span className="text-[8px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">
+                                      Holding
+                                    </span>
+                                  )}
+                                  {isDashboard && (!positions || !positions.some(p => p.symbol.toUpperCase() === item.symbol.toUpperCase() && p.amount > 0)) && (
+                                    <span className="text-[8px] font-black uppercase tracking-widest bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-1.5 py-0.5 rounded">
+                                      Performer
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">MCap: {item.marketCap}</div>
                             </div>
                         </div>

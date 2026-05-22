@@ -74,7 +74,7 @@ export function TransferView() {
       return;
     }
     if (!recipientIp) {
-      showToast("Alamat IP Penerima wajib diisi.", "error", "TransferView-recipientIp-input");
+      showToast("Alamat Key Address Penerima wajib diisi.", "error", "TransferView-recipientIp-input");
       return;
     }
     if (submitting) return;
@@ -104,13 +104,13 @@ export function TransferView() {
       if (success) {
         setSuccessInfo({
           type: 'crypto',
-          msg: `Berhasil mengirim ${amt} ${selectedAsset} ke alamat IP ${recipientIp}!`
+          msg: `Berhasil mengirim ${amt} ${selectedAsset} ke Key Address ${recipientIp}!`
         });
-        showToast(`Sukses mentransfer ${amt} ${selectedAsset} ke IP ${recipientIp}!`, "success");
+        showToast(`Sukses mentransfer ${amt} ${selectedAsset} ke Key Address ${recipientIp}!`, "success");
         setCryptoAmount('');
         setRecipientIp('');
       } else {
-        const msg = "Transfer gagal. Periksa kembali alamat IP tujuan Anda.";
+        const msg = "Transfer gagal. Periksa kembali alamat Key Address tujuan Anda.";
         setErrorInfo(msg);
         showToast(msg, "error", "TransferView-crypto-failure");
       }
@@ -131,7 +131,7 @@ export function TransferView() {
         <div className="flex flex-col gap-2">
           <h2 className="text-3xl font-black tracking-tighter text-white">Transfer</h2>
           <p className="text-slate-400 text-sm font-bold uppercase tracking-widest text-[10px]">
-            Send assets securely using account numbers or direct Virtual IPs.
+            Send assets securely using account numbers or direct Key Addresses.
           </p>
         </div>
 
@@ -150,7 +150,7 @@ export function TransferView() {
             }`}
           >
             <Orbit className="w-4 h-4 text-cyan-400" />
-            Direct Crypto IP
+            Direct Key Address
           </button>
           <button
             onClick={() => {
@@ -248,14 +248,14 @@ export function TransferView() {
 
               {/* Recipient IP Input */}
               <div className="space-y-2">
-                <label className="text-[10px] pl-1 font-black uppercase tracking-widest text-slate-500">Alamat IP Aset Penerima</label>
+                <label className="text-[10px] pl-1 font-black uppercase tracking-widest text-slate-500">Key Address Aset Penerima</label>
                 <div className="relative">
                   <Orbit className="absolute left-6 top-6 text-slate-500 w-5 h-5" />
                   <input
                     type="text"
                     value={recipientIp}
                     onChange={(e) => setRecipientIp(e.target.value)}
-                    placeholder={`Contoh IP ${selectedAsset}: 10.10x.y.z`}
+                    placeholder={`Contoh Key: ak_live_${selectedAsset.toLowerCase()}_...`}
                     className="w-full bg-slate-900 border-2 border-slate-800 rounded-[28px] pl-16 pr-6 py-5 text-sm font-bold font-mono text-white focus:border-cyan-500 focus:bg-slate-800 outline-none transition-all placeholder:text-slate-600 shadow-inner"
                   />
                 </div>
@@ -302,7 +302,7 @@ export function TransferView() {
                 ) : (
                   <>
                     <ArrowRightLeft className="w-4 h-4" />
-                    Kirim {selectedAsset} over IP
+                    Kirim {selectedAsset} ke Key Address
                   </>
                 )}
               </button>

@@ -66,7 +66,7 @@ export function AssetsView({ prices, loading, activeAction, onActionChange }: As
               </div>
               <div className="text-right">
                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">Trading Balance</div>
-                <div className="text-xl font-black text-white">IDR {(totalValue - eWalletBalance).toLocaleString()}</div>
+                <div className="text-xl font-black text-white">IDR {totalValue.toLocaleString()}</div>
               </div>
             </div>
             <button 

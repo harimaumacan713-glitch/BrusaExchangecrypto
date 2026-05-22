@@ -429,7 +429,7 @@ async function startServer() {
   // External CryptoCompare WebSocket logic
   const apiKey = process.env.CRYPTO_NEWS_API_KEY;
   let ccWs: WebSocket | null = null;
-  const symbols = ["BTC", "ETH", "SOL", "USDT"];
+  const symbols = ["BTC", "ETH", "SOL", "USDT", "XRP", "ADA", "DOT", "DOGE", "MATIC", "AVAX", "BNB", "LINK", "NEAR", "TON"];
 
   const connectToCC = () => {
     if (!apiKey) {
@@ -556,7 +556,7 @@ async function startServer() {
     console.log('Fetching prices...');
     try {
       const apiKey = process.env.CRYPTO_NEWS_API_KEY;
-      const symbolsList = ["BTC", "ETH", "SOL", "USDT", "XRP", "ADA", "DOT", "DOGE", "MATIC", "AVAX"];
+      const symbolsList = ["BTC", "ETH", "SOL", "USDT", "XRP", "ADA", "DOT", "DOGE", "MATIC", "AVAX", "BNB", "LINK", "NEAR", "TON"];
       const symbols = symbolsList.join(",");
       const url = `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${symbols}&tsyms=IDR${apiKey ? `&api_key=${apiKey}` : ""}`;
       
@@ -670,16 +670,36 @@ async function startServer() {
 function getMockPrices() {
   return {
     RAW: {
-      BTC: { IDR: { PRICE: 1100000000, CHANGEPCT24HOUR: 2.5, MKTCAP: 21000000000000, VOLUME24HOUR: 450000000000 } },
-      ETH: { IDR: { PRICE: 50000000, CHANGEPCT24HOUR: 1.8, MKTCAP: 6000000000000, VOLUME24HOUR: 220000000000 } },
-      SOL: { IDR: { PRICE: 2000000, CHANGEPCT24HOUR: 5.2, MKTCAP: 900000000000, VOLUME24HOUR: 85000000000 } },
-      USDT: { IDR: { PRICE: 16000, CHANGEPCT24HOUR: 0.1, MKTCAP: 1600000000000, VOLUME24HOUR: 1100000000000 } }
+      BTC: { IDR: { PRICE: 1100000000, CHANGEPCT24HOUR: 2.50, MKTCAP: 21000000000000, VOLUME24HOUR: 450000000000 } },
+      ETH: { IDR: { PRICE: 50000000, CHANGEPCT24HOUR: 1.88, MKTCAP: 6000000000000, VOLUME24HOUR: 220000000000 } },
+      SOL: { IDR: { PRICE: 2000000, CHANGEPCT24HOUR: 5.24, MKTCAP: 900000000000, VOLUME24HOUR: 85000000000 } },
+      USDT: { IDR: { PRICE: 16150, CHANGEPCT24HOUR: 0.12, MKTCAP: 1600000000000, VOLUME24HOUR: 1100000000000 } },
+      XRP: { IDR: { PRICE: 8500, CHANGEPCT24HOUR: -1.25, MKTCAP: 375000000000000, VOLUME24HOUR: 12000000000000 } },
+      ADA: { IDR: { PRICE: 6800, CHANGEPCT24HOUR: 0.52, MKTCAP: 250000000000000, VOLUME24HOUR: 8000000000000 } },
+      DOT: { IDR: { PRICE: 100000, CHANGEPCT24HOUR: -2.30, MKTCAP: 110000000000000, VOLUME24HOUR: 4000000000000 } },
+      DOGE: { IDR: { PRICE: 2400, CHANGEPCT24HOUR: 12.45, MKTCAP: 320000000000000, VOLUME24HOUR: 25000000000000 } },
+      MATIC: { IDR: { PRICE: 11000, CHANGEPCT24HOUR: -0.85, MKTCAP: 80000000000000, VOLUME24HOUR: 3000000000000 } },
+      AVAX: { IDR: { PRICE: 550000, CHANGEPCT24HOUR: 4.12, MKTCAP: 180000000000000, VOLUME24HOUR: 9000000000000 } },
+      BNB: { IDR: { PRICE: 9500000, CHANGEPCT24HOUR: 3.15, MKTCAP: 1500000000000000, VOLUME24HOUR: 50000000000000 } },
+      LINK: { IDR: { PRICE: 240000, CHANGEPCT24HOUR: -0.22, MKTCAP: 140000000000000, VOLUME24HOUR: 8000000000000 } },
+      NEAR: { IDR: { PRICE: 98000, CHANGEPCT24HOUR: 6.82, MKTCAP: 105000000000000, VOLUME24HOUR: 12500000000000 } },
+      TON: { IDR: { PRICE: 112000, CHANGEPCT24HOUR: -1.75, MKTCAP: 280000000000000, VOLUME24HOUR: 15000000000000 } }
     },
     DISPLAY: {
-      BTC: { IDR: { PRICE: "Rp 1.100.000.000", CHANGEPCT24HOUR: "2.5", MKTCAP: "Rp 21.000 T", VOLUME24HOUR: "Rp 450 T" } },
-      ETH: { IDR: { PRICE: "Rp 50.000.000", CHANGEPCT24HOUR: "1.8", MKTCAP: "Rp 6.000 T", VOLUME24HOUR: "Rp 220 T" } },
-      SOL: { IDR: { PRICE: "Rp 2.000.000", CHANGEPCT24HOUR: "5.2", MKTCAP: "Rp 900 T", VOLUME24HOUR: "Rp 85 T" } },
-      USDT: { IDR: { PRICE: "Rp 16.000", CHANGEPCT24HOUR: "0.1", MKTCAP: "Rp 1.600 T", VOLUME24HOUR: "Rp 1.100 T" } }
+      BTC: { IDR: { PRICE: "Rp 1.100.000.000", CHANGEPCT24HOUR: "2.50", MKTCAP: "Rp 21.000 T", VOLUME24HOUR: "Rp 450 T" } },
+      ETH: { IDR: { PRICE: "Rp 50.000.000", CHANGEPCT24HOUR: "1.88", MKTCAP: "Rp 6.000 T", VOLUME24HOUR: "Rp 220 T" } },
+      SOL: { IDR: { PRICE: "Rp 2.000.000", CHANGEPCT24HOUR: "5.24", MKTCAP: "Rp 900 T", VOLUME24HOUR: "Rp 85 T" } },
+      USDT: { IDR: { PRICE: "Rp 16.150", CHANGEPCT24HOUR: "0.12", MKTCAP: "Rp 1.600 T", VOLUME24HOUR: "Rp 1.100 T" } },
+      XRP: { IDR: { PRICE: "Rp 8.500", CHANGEPCT24HOUR: "-1.25", MKTCAP: "Rp 375 T", VOLUME24HOUR: "Rp 12 T" } },
+      ADA: { IDR: { PRICE: "Rp 6.800", CHANGEPCT24HOUR: "0.52", MKTCAP: "Rp 250 T", VOLUME24HOUR: "Rp 8 T" } },
+      DOT: { IDR: { PRICE: "Rp 100.000", CHANGEPCT24HOUR: "-2.30", MKTCAP: "Rp 110 T", VOLUME24HOUR: "Rp 4 T" } },
+      DOGE: { IDR: { PRICE: "Rp 2.400", CHANGEPCT24HOUR: "12.45", MKTCAP: "Rp 320 T", VOLUME24HOUR: "Rp 25 T" } },
+      MATIC: { IDR: { PRICE: "Rp 11.000", CHANGEPCT24HOUR: "-0.85", MKTCAP: "Rp 80 T", VOLUME24HOUR: "Rp 3 T" } },
+      AVAX: { IDR: { PRICE: "Rp 550.050", CHANGEPCT24HOUR: "4.12", MKTCAP: "Rp 180 T", VOLUME24HOUR: "Rp 9 T" } },
+      BNB: { IDR: { PRICE: "Rp 9.500.000", CHANGEPCT24HOUR: "3.15", MKTCAP: "Rp 1.500 T", VOLUME24HOUR: "Rp 50 T" } },
+      LINK: { IDR: { PRICE: "Rp 240.000", CHANGEPCT24HOUR: "-0.22", MKTCAP: "Rp 140 T", VOLUME24HOUR: "Rp 8 T" } },
+      NEAR: { IDR: { PRICE: "Rp 98.000", CHANGEPCT24HOUR: "6.82", MKTCAP: "Rp 105 T", VOLUME24HOUR: "Rp 12.5 T" } },
+      TON: { IDR: { PRICE: "Rp 112.000", CHANGEPCT24HOUR: "-1.75", MKTCAP: "Rp 280 T", VOLUME24HOUR: "Rp 15 T" } }
     }
   };
 }
@@ -854,10 +874,23 @@ function getMockNews() {
     } catch (error) {
       console.error("Error fetching history for", symbol, ":", (error as Error).message);
       // Fallback mock history if API fails
-      const mockHistory = Array.from({ length: 24 }, (_, i) => ({
-        time: `${i}:00`,
-        price: 100 + Math.random() * 20
-      }));
+      let basePrice = 100;
+      const cryptoBasePrices: Record<string, number> = {
+        BTC: 1100000000, ETH: 50000000, SOL: 2000000, XRP: 8500, ADA: 6800, DOT: 100000, DOGE: 2400, MATIC: 11000, AVAX: 550000, BNB: 9500000, LINK: 240000, NEAR: 98000, TON: 112000, USDT: 16150
+      };
+      if (typeof symbol === 'string' && cryptoBasePrices[symbol]) {
+        basePrice = cryptoBasePrices[symbol];
+      }
+      
+      const count = range === '7d' ? 168 : range === '1m' ? 30 : range === '1y' ? 365 : 24;
+      const mockHistory = Array.from({ length: count }, (_, i) => {
+        const time = new Date(Date.now() - (count - i) * (count <= 24 ? 3600000 : 86400000));
+        return {
+          time: time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          fullTime: time.toLocaleString(),
+          price: basePrice * (1 + (Math.random() * 0.08 - 0.04))
+        };
+      });
       res.json(mockHistory);
     }
   });

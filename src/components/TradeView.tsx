@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowDownUp, Info, ChevronDown, Wallet, Target, Zap, History, Clock, CheckCircle2, XCircle, Orbit, Landmark, TrendingUp, Compass } from 'lucide-react';
+import { ArrowDownUp, Info, ChevronDown, Wallet, Target, Zap, History, Clock, CheckCircle2, XCircle, X, Orbit, Landmark, TrendingUp, Compass } from 'lucide-react';
 import { AreaChart, Area, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceDot, ReferenceLine } from 'recharts';
 
 function CustomTooltip({ active, payload, currentPosition }: any) {
@@ -330,7 +330,10 @@ import { StockPriceSkeleton } from './StockPriceSkeleton';
 import { useTrading } from '../context/TradingContext';
 
 export function TradeView({ prices, loading }: { prices: any; loading: boolean }) {
-  const { balance, balanceUsdt, buyAsset, sellAsset, positions, orders, getTotalValue } = useTrading();
+  const { balance, balanceUsdt, buyAsset, sellAsset, positions, orders, getTotalValue, priceAlerts, addPriceAlert, removePriceAlert, togglePriceAlert } = useTrading();
+  
+  const [alertPriceInput, setAlertPriceInput] = useState('');
+  const [isSettingAlert, setIsSettingAlert] = useState(false);
   
   const currentPricesUsdt: Record<string, number> = {};
   const currentUsdtRate = prices?.RAW?.USDT?.IDR?.PRICE || 16150;
@@ -458,6 +461,22 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
       setIsProcessing(false);
       setTimeout(() => setLastOrderMessage(null), 3000);
     }, 800);
+  };
+
+  const handleCreateAlert = async () => {
+    if (!alertPriceInput || isNaN(Number(alertPriceInput))) return;
+    setIsSettingAlert(true);
+    try {
+      const targetUserPrice = Number(alertPriceInput);
+      const isSuccess = await addPriceAlert(targetAsset, targetUserPrice, currentPriceUsdt);
+      if (isSuccess) {
+        setAlertPriceInput('');
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSettingAlert(false);
+    }
   };
 
   const assetIcons: Record<string, string> = {
@@ -792,6 +811,137 @@ export function TradeView({ prices, loading }: { prices: any; loading: boolean }
                 </motion.div>
             )}
             </AnimatePresence>
+
+            {/* Price Alerts Card */}
+            <div className="bg-slate-900 border border-slate-800/80 rounded-[28px] p-6 shadow-2xl mt-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 h-24 rounded-full blur-2xl opacity-[0.03] bg-cyan-400" />
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Target className="w-5 h-5 text-cyan-400 animate-pulse" />
+                  <h3 className="font-bold text-md text-white tracking-tight">Set Price Alert</h3>
+                </div>
+                <span className="text-[9px] font-black text-cyan-400 bg-cyan-950/40 border border-cyan-800/40 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                  Real-time
+                </span>
+              </div>
+
+              {/* Input Form */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-wider">Target Price ({targetAsset})</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <span className="text-slate-500 font-bold">$</span>
+                    </div>
+                    <input
+                      type="number"
+                      value={alertPriceInput}
+                      onChange={(e) => setAlertPriceInput(e.target.value)}
+                      placeholder={`Contoh: ${(currentPriceUsdt * 1.05).toFixed(2)}`}
+                      className="w-full pl-8 pr-4 py-3 bg-slate-950 border border-slate-800 focus:border-cyan-500/50 rounded-2xl text-white font-mono text-xs focus:outline-none transition-colors"
+                    />
+                  </div>
+                </div>
+
+                {/* Notification Mode Summary */}
+                {alertPriceInput && !isNaN(Number(alertPriceInput)) && Number(alertPriceInput) > 0 && (
+                  <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 flex items-center gap-2.5">
+                    <div className={`w-2 h-2 rounded-full ${Number(alertPriceInput) > currentPriceUsdt ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                    <p className="text-[11px] text-slate-300 font-sans font-semibold leading-normal">
+                      Will trigger alarm when {targetAsset} crosses{' '}
+                      <span className={Number(alertPriceInput) > currentPriceUsdt ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                        {Number(alertPriceInput) > currentPriceUsdt ? 'ABOVE' : 'BELOW'}
+                      </span>{' '}
+                      ${Number(alertPriceInput).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleCreateAlert}
+                  disabled={isSettingAlert || !alertPriceInput}
+                  className="w-full py-3.5 bg-cyan-500 hover:bg-cyan-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-black uppercase text-xs tracking-widest rounded-2xl transition-all duration-300 shadow-xl shadow-cyan-500/5 hover:shadow-cyan-500/15"
+                >
+                  {isSettingAlert ? 'Processing...' : 'Activate Reminder'}
+                </button>
+              </div>
+
+              {/* List of active/triggered alerts */}
+              <div className="mt-6 border-t border-slate-800/80 pt-5">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Your Price Alerts</h4>
+                {priceAlerts && priceAlerts.length > 0 ? (
+                  <div className="space-y-3.5 max-h-52 overflow-y-auto pr-1">
+                    {priceAlerts.map((alert) => (
+                      <div
+                        key={alert.id}
+                        className={`flex items-center justify-between p-3 bg-slate-950/50 border ${
+                          alert.isTriggered ? 'border-slate-800/50 opacity-55' : 'border-slate-800 hover:border-slate-700'
+                        } rounded-2xl transition-all`}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-sans font-black text-white text-xs">{alert.symbol}</span>
+                            <span
+                              className={`text-[8px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                                alert.condition === 'above'
+                                  ? 'bg-emerald-950/55 text-emerald-400 border border-emerald-500/10'
+                                  : 'bg-rose-950/55 text-rose-400 border border-rose-500/10'
+                              }`}
+                            >
+                              {alert.condition === 'above' ? '▲ ABOVE' : '▼ BELOW'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-300 font-mono font-medium">
+                            ${alert.targetPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          {/* Triggered Status Badge */}
+                          <span
+                            className={`text-[8.5px] font-bold px-2 py-0.5 rounded-full ${
+                              alert.isTriggered
+                                ? 'bg-slate-800 text-slate-400'
+                                : 'bg-cyan-950/40 text-cyan-400 border border-cyan-800/30'
+                            }`}
+                          >
+                            {alert.isTriggered ? 'Triggered' : 'Active'}
+                          </span>
+
+                          {/* Toggle active button if not triggered */}
+                          {!alert.isTriggered && (
+                            <button
+                              onClick={() => togglePriceAlert(alert.id, !alert.isActive)}
+                              className={`p-1.5 flex items-center justify-center rounded-xl border text-[10px] font-bold transition-all ${
+                                alert.isActive
+                                  ? 'bg-cyan-950/30 border-cyan-800/45 text-cyan-400 hover:bg-cyan-900/40'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                              }`}
+                              title={alert.isActive ? 'Deactivate' : 'Activate'}
+                            >
+                              {alert.isActive ? 'On' : 'Off'}
+                            </button>
+                          )}
+
+                          {/* Delete button */}
+                          <button
+                            onClick={() => removePriceAlert(alert.id)}
+                            className="p-1 rounded-xl hover:bg-rose-950/30 hover:text-rose-400 text-slate-500 transition-all border border-transparent hover:border-rose-950"
+                            title="Delete"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-6 border border-dashed border-slate-800/80 rounded-[20px] text-slate-500 text-xs italic font-medium">
+                    No price reminders set yet.
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 

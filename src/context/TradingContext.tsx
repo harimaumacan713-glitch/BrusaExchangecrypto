@@ -1,6 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useFirebase } from './FirebaseContext';
-import { doc, onSnapshot, collection, query, where, runTransaction, serverTimestamp, addDoc, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, runTransaction, serverTimestamp, addDoc, getDocs, updateDoc, deleteDoc } from 'firebase/firestore';
+import { useToast } from './ToastContext';
+
+export interface PriceAlert {
+  id: string;
+  symbol: string;
+  targetPrice: number;
+  condition: 'above' | 'below';
+  isActive: boolean;
+  isTriggered: boolean;
+  createdAt: number;
+}
 
 interface Position {
   symbol: string;
@@ -53,12 +64,18 @@ interface TradingContextType {
   getTotalValue: (currentPrices: Record<string, number>) => number;
   getUnrealizedPnl: (currentPrices: Record<string, number>) => number;
   usdtRate: number;
+  priceAlerts: PriceAlert[];
+  addPriceAlert: (symbol: string, targetPrice: number, currentPrice?: number, condition?: 'above' | 'below') => Promise<boolean>;
+  removePriceAlert: (id: string) => Promise<boolean>;
+  togglePriceAlert: (id: string, isActive: boolean) => Promise<boolean>;
+  checkPriceAlerts: (currentPricesUsdt: Record<string, number>) => void;
 }
 
 const TradingContext = createContext<TradingContextType | undefined>(undefined);
 
 export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { auth, db } = useFirebase();
+  const { showToast } = useToast();
   const [balance, setBalance] = useState(0); // Exchange IDR
   const [eWalletBalance, setEWalletBalance] = useState(0); // E-Wallet IDR
   const [accountNumber, setAccountNumber] = useState<string | null>(null);
@@ -68,6 +85,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [externalTransfers, setExternalTransfers] = useState<ExternalTransfer[]>([]);
   const [incomingNotification, setIncomingNotification] = useState<{ amount: number, fromName: string, type: 'transfer' | 'deposit' | 'crypto_transfer_received', symbol?: string } | null>(null);
   const [usdtRate, setUsdtRate] = useState(16150);
+  const [priceAlerts, setPriceAlerts] = useState<PriceAlert[]>([]);
 
   // Fetch exchange rate
   useEffect(() => {
@@ -186,6 +204,16 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
     });
 
+    // Listen to price alerts
+    const alertsRef = collection(db, 'exchange_wallets', auth.currentUser.uid, 'price_alerts');
+    const unsubscribeAlerts = onSnapshot(alertsRef, (snapshot) => {
+        const newAlerts: PriceAlert[] = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        } as PriceAlert));
+        setPriceAlerts(newAlerts);
+    });
+
     return () => {
         unsubscribeProfile();
         unsubscribeWallet();
@@ -193,6 +221,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         unsubscribePositions();
         unsubscribeTransactions();
         unsubscribeExternal();
+        unsubscribeAlerts();
     };
   }, [auth.currentUser, db]);
 
@@ -426,7 +455,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const querySnap = await getDocs(q);
       
       if (querySnap.empty) {
-        throw new Error(`Alamat IP Penerima untuk asset ${upSymbol} tidak ditemukan.`);
+        throw new Error(`Alamat Key Address Penerima untuk asset ${upSymbol} tidak ditemukan.`);
       }
       
       const recipientDoc = querySnap.docs[0];
@@ -608,8 +637,104 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const totalRealizedPnl = orders.reduce((acc, order) => acc + (order.pnl || 0), 0);
 
+  const addPriceAlert = async (symbol: string, targetPrice: number, currentPrice?: number, condition?: 'above' | 'below'): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+    
+    let cond: 'above' | 'below' = 'above';
+    if (condition) {
+      cond = condition;
+    } else if (currentPrice) {
+      cond = targetPrice > currentPrice ? 'above' : 'below';
+    }
+
+    try {
+      const uid = auth.currentUser.uid;
+      const alertsRef = collection(db, 'exchange_wallets', uid, 'price_alerts');
+      await addDoc(alertsRef, {
+        symbol: symbol.toUpperCase(),
+        targetPrice: Number(targetPrice),
+        condition: cond,
+        isActive: true,
+        isTriggered: false,
+        createdAt: Date.now()
+      });
+      return true;
+    } catch (e) {
+      console.error("Failed to add price alert:", e);
+      return false;
+    }
+  };
+
+  const removePriceAlert = async (id: string): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+    try {
+      const uid = auth.currentUser.uid;
+      const alertRef = doc(db, 'exchange_wallets', uid, 'price_alerts', id);
+      await deleteDoc(alertRef);
+      return true;
+    } catch (e) {
+      console.error("Failed to delete price alert:", e);
+      return false;
+    }
+  };
+
+  const togglePriceAlert = async (id: string, isActive: boolean): Promise<boolean> => {
+    if (!auth.currentUser) return false;
+    try {
+      const uid = auth.currentUser.uid;
+      const alertRef = doc(db, 'exchange_wallets', uid, 'price_alerts', id);
+      await updateDoc(alertRef, {
+        isActive,
+        isTriggered: isActive ? false : false
+      });
+      return true;
+    } catch (e) {
+      console.error("Failed to toggle price alert:", e);
+      return false;
+    }
+  };
+
+  const checkPriceAlerts = useCallback((currentPricesUsdt: Record<string, number>) => {
+    if (!auth.currentUser) return;
+    
+    priceAlerts.forEach((alert) => {
+      if (!alert.isActive || alert.isTriggered) return;
+      
+      const currentPrice = currentPricesUsdt[alert.symbol];
+      if (!currentPrice) return;
+      
+      let shouldTrigger = false;
+      if (alert.condition === 'above' && currentPrice >= alert.targetPrice) {
+        shouldTrigger = true;
+      } else if (alert.condition === 'below' && currentPrice <= alert.targetPrice) {
+        shouldTrigger = true;
+      }
+      
+      if (shouldTrigger) {
+        showToast(
+          `🔔 Price Alert: ${alert.symbol} telah menembus target ${alert.condition === 'above' ? 'Ke Atas (ABOVE)' : 'Ke Bawah (BELOW)'} senilai $${alert.targetPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}! (Harga saat ini: $${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })})`,
+          'info',
+          'price-alert'
+        );
+        
+        const uid = auth.currentUser.uid;
+        const alertRef = doc(db, 'exchange_wallets', uid, 'price_alerts', alert.id);
+        
+        try {
+          updateDoc(alertRef, {
+            isTriggered: true,
+            isActive: false,
+            updatedAt: serverTimestamp()
+          });
+        } catch (e) {
+          console.error("Failed to update alert status in DB:", e);
+        }
+      }
+    });
+  }, [auth.currentUser, priceAlerts, db, showToast]);
+
   return (
-    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, accountNumber, userAssetIps, positions, orders, externalTransfers, incomingNotification, setIncomingNotification, totalRealizedPnl, buyAsset, sellAsset, withdraw, transferAsset, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl, usdtRate }}>
+    <TradingContext.Provider value={{ balance, balanceUsdt, eWalletBalance, accountNumber, userAssetIps, positions, orders, externalTransfers, incomingNotification, setIncomingNotification, totalRealizedPnl, buyAsset, sellAsset, withdraw, transferAsset, depositToExchange, withdrawFromExchange, clearHistory, getTotalValue, getUnrealizedPnl, usdtRate, priceAlerts, addPriceAlert, removePriceAlert, togglePriceAlert, checkPriceAlerts }}>
       {children}
     </TradingContext.Provider>
   );

@@ -103,7 +103,7 @@ export function ReceiveView() {
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            Crypto Asset IP
+            Crypto Key Address
           </button>
         </div>
 
@@ -150,10 +150,10 @@ export function ReceiveView() {
           >
             <div className="bg-slate-900 border border-slate-800/80 rounded-[28px] p-6 text-slate-300">
                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] mb-2 text-cyan-400 flex items-center gap-1.5 leading-none">
-                 <Orbit className="w-4 h-4 animate-spin text-cyan-400" /> Cyber Asset IP Protocol (CoIP)
+                 <Orbit className="w-4 h-4 animate-spin text-cyan-400" /> Cyber Asset Key Address (CAKA)
                </h4>
                <p className="text-xs text-slate-400 leading-relaxed font-bold">
-                 Setiap aset kripto Anda memiliki alamat IP virtual yang aman. Bagikan IP berikut kepada pengirim untuk menerima transfer instan tanpa biaya gas.
+                 Setiap aset kripto Anda memiliki alamat API Key Address unik yang aman. Bagikan alamat Key berikut kepada pengirim untuk menerima transfer instan tanpa biaya gas.
                </p>
             </div>
 
@@ -178,7 +178,7 @@ export function ReceiveView() {
                           <span className="text-[8px] tracking-wider bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded font-mono font-black text-slate-400">{symbol}</span>
                         </div>
                         <div className="text-xs font-mono font-bold text-cyan-400 tracking-wide select-all">
-                          {ip || 'Initializing Asset IP...'}
+                          {ip || 'Initializing Key Address...'}
                         </div>
                       </div>
                     </div>
@@ -254,7 +254,7 @@ export function ReceiveView() {
                               )}
                             </div>
                             <div className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                              {isCrypto ? 'Direct IP Transfer' : 'E-Wallet Transfer'}
+                              {isCrypto ? 'Direct Key Transfer' : 'E-Wallet Transfer'}
                             </div>
                           </div>
                       </motion.div>

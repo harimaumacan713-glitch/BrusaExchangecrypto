@@ -1,11 +1,11 @@
 import React from 'react';
-import { Bell, User, Search, BookOpen, Repeat, MessageCircle, MessageSquare, Orbit, Swords } from 'lucide-react';
+import { Bell, User, Search, BookOpen, Repeat, MessageCircle, MessageSquare, Orbit, Swords, Gift } from 'lucide-react';
 import { motion } from 'motion/react';
 
 import { useTrading } from '../context/TradingContext';
 
 export function Hero({ prices, onTabChange }: { prices?: any; onTabChange: (tab: any) => void }) {
-  const { balance, positions, getTotalValue, getUnrealizedPnl, totalRealizedPnl, accountNumber } = useTrading();
+  const { balance, positions, orders, getTotalValue, getUnrealizedPnl, totalRealizedPnl, accountNumber } = useTrading();
   
   const currentUsdtRate = prices?.RAW?.USDT?.IDR?.PRICE || 16150;
   
@@ -22,8 +22,27 @@ export function Hero({ prices, onTabChange }: { prices?: any; onTabChange: (tab:
   const totalUnrealizedPnlUsdt = getUnrealizedPnl(currentPricesUsdt);
   const totalUnrealizedPnlIdr = totalUnrealizedPnlUsdt * currentUsdtRate;
 
-  const totalPerformanceUsdt = totalValueUsdt - 10000; // 10k USDT initial
-  const perfPercent = (totalPerformanceUsdt / 10000) * 100;
+  // Dynamically calculate the total net deposits made into the exchange (initial cost/funding basis)
+  const netExchangeDepositsIdr = orders
+    ? orders
+        .filter(o => o.type === 'deposit_to_exchange')
+        .reduce((acc, o) => acc + (o.amount || 0), 0) -
+      orders
+        .filter(o => o.type === 'withdraw_from_exchange')
+        .reduce((acc, o) => acc + (o.amount || 0), 0)
+    : 0;
+
+  // Use the user's actual deposits as cost basis. Fallback to (totalValueIdr - totalUnrealizedPnlIdr) if no deposits are registered.
+  const initialCostBasisIdr = netExchangeDepositsIdr > 0 
+    ? netExchangeDepositsIdr 
+    : (totalValueIdr - totalUnrealizedPnlIdr);
+
+  const totalPerformanceIdr = totalValueIdr - initialCostBasisIdr;
+  const perfPercent = initialCostBasisIdr > 0 
+    ? (totalPerformanceIdr / initialCostBasisIdr) * 100 
+    : 0;
+
+  const totalPerformanceUsdt = totalPerformanceIdr / currentUsdtRate;
 
   const formattedBalance = new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -41,7 +60,7 @@ export function Hero({ prices, onTabChange }: { prices?: any; onTabChange: (tab:
   const heroMenu = [
     { icon: BookOpen, label: 'Academy', tab: 'academy' },
     { icon: Repeat, label: 'Recurring', tab: 'recurring' },
-    { icon: Swords, label: 'AI Arena', tab: 'arena' },
+    { icon: Gift, label: 'Events & Rewards', tab: 'arena' },
     { icon: MessageCircle, label: 'Live Chat', tab: 'chat' },
     { icon: MessageSquare, label: 'Chat Room', tab: 'chatroom' }
   ];
@@ -51,7 +70,7 @@ export function Hero({ prices, onTabChange }: { prices?: any; onTabChange: (tab:
       initial={{ opacity: 0, y: 30 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.8, ease: "easeOut" }}
-      className="relative text-white p-6 pb-24 overflow-hidden md:rounded-t-[48px] rounded-b-[48px] shadow-2xl"
+      className="relative text-white pt-14 pb-24 px-6 md:p-8 md:pb-24 overflow-hidden md:rounded-t-[48px] rounded-b-[48px] shadow-2xl"
     >
       {/* Sophisticated Background */}
       <div className="absolute inset-0 z-0 bg-slate-950">

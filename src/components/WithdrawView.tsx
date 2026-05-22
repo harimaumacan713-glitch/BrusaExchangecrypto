@@ -153,15 +153,15 @@ export function WithdrawView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
         {withdrawMethods.map((method) => (
           <button
             key={method.id}
             onClick={() => setWithdrawMethod(method.id as any)}
-            className={`p-4 rounded-[28px] flex flex-col items-center gap-2 border-2 transition-all ${withdrawMethod === method.id ? 'border-indigo-500 bg-indigo-500/10 text-cyan-400 shadow-lg shadow-indigo-500/10' : 'border-slate-800 bg-slate-900 text-slate-500 hover:text-white hover:bg-slate-800'}`}
+            className={`p-2.5 sm:p-4 rounded-2xl sm:rounded-[28px] flex flex-col items-center gap-1.5 sm:gap-2 border-2 transition-all ${withdrawMethod === method.id ? 'border-indigo-500 bg-indigo-500/10 text-cyan-400 shadow-lg shadow-indigo-500/10' : 'border-slate-800 bg-slate-900 text-slate-500 hover:text-white hover:bg-slate-800'}`}
           >
-            <method.icon className="w-6 h-6" />
-            <span className="text-[10px] font-black uppercase text-center tracking-widest">{method.label}</span>
+            <method.icon className="w-5 h-5 sm:w-6 sm:h-6" />
+            <span className="text-[8px] sm:text-[10px] font-black uppercase text-center tracking-wider sm:tracking-widest">{method.label}</span>
           </button>
         ))}
       </div>

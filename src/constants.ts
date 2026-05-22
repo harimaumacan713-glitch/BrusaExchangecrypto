@@ -8,6 +8,10 @@ export const ASSET_METADATA: Record<string, { name: string; logo: string }> = {
   DOGE: { name: 'Dogecoin', logo: 'https://upload.wikimedia.org/wikipedia/commons/d/d9/Dogecoin_Logo.png' },
   MATIC: { name: 'Polygon', logo: 'https://upload.wikimedia.org/wikipedia/commons/2/29/Polygon_logo.svg' },
   AVAX: { name: 'Avalanche', logo: 'https://upload.wikimedia.org/wikipedia/commons/c/c5/Avalanche_logo.svg' },
+  BNB: { name: 'BNB', logo: 'https://upload.wikimedia.org/wikipedia/commons/f/fc/Binance_Logo.svg' },
+  LINK: { name: 'Chainlink', logo: 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chainlink_Logo.svg' },
+  NEAR: { name: 'Near', logo: 'https://upload.wikimedia.org/wikipedia/commons/d/db/Near_protocol_logo.svg' },
+  TON: { name: 'Toncoin', logo: 'https://upload.wikimedia.org/wikipedia/commons/0/01/Ton_logo.svg' },
 };
 
 export const getLogoUrl = (symbol: string, fallbackUrl?: string | null) => ASSET_METADATA[symbol]?.logo || fallbackUrl || null;
